@@ -572,6 +572,7 @@ async function load() {
   $('main').classList.add('refetching');
   try {
     const res = await fetch('/api/dashboard');
+    if (res.status === 401) { location.href = '/login'; return; }
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     state.data = data;
@@ -596,6 +597,11 @@ $('sync-btn').addEventListener('click', async () => {
     btn.textContent = 'Sync now';
     $('main').classList.remove('refetching');
   }
+});
+
+$('logout-btn').addEventListener('click', async () => {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  location.href = '/login';
 });
 
 $('theme-btn').addEventListener('click', () => {

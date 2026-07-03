@@ -1,0 +1,9 @@
+node_modules
+.env
+data/cache.json
+data/prices.json
+data/auth.json
+data/imports/*.csv
+data/manual.json
+.git
+docs

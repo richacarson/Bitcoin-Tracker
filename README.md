@@ -19,6 +19,11 @@ npm install
 npm start          # → http://localhost:3000
 ```
 
+The first time you open the site you'll be asked to **create a password** for
+the single account (username `richacarson` — change with `AUTH_USERNAME`).
+After that, the same screen is a normal login; sessions last 30 days and
+there's a lockout after repeated wrong guesses.
+
 With no keys configured you'll see a **demo portfolio** so you can explore the
 dashboard. To connect your real accounts:
 
@@ -110,6 +115,36 @@ different pocket."
   sources are connected; the small gap vs. the trade ledger (withdrawal
   network fees, dust) is shown in *Where it lives*.
 - Numbers are informational — not tax advice.
+
+## Going live (hosted, password-protected)
+
+The app is ready to deploy anywhere that runs Node or Docker. The login page
+protects everything; always deploy behind HTTPS (all the hosts below provide
+it automatically).
+
+**Render (recommended, simplest):**
+
+1. Push this repo to GitHub.
+2. In render.com: **New → Blueprint**, pick the repo — `render.yaml` sets
+   everything up, including a 1 GB persistent disk for `data/` (so your
+   password, synced history, and caches survive deploys).
+3. In the service's **Environment** tab, add your secrets:
+   `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, `COINBASE_API_KEY_NAME`,
+   `COINBASE_API_PRIVATE_KEY`, `PHANTOM_BTC_ADDRESSES`.
+4. Open the URL Render gives you — the first visit shows the
+   **create password** screen.
+
+**Railway / Fly.io / any Docker host:** deploy with the included
+`Dockerfile` and mount a volume at `/app/data`. Set the same env vars.
+
+**Hosts without a persistent disk** (e.g. Render's free tier): set
+`APP_PASSWORD` and `SESSION_SECRET` env vars — the password then lives in
+the environment instead of on disk, and the app just re-syncs history after
+each deploy.
+
+Login details: single user, password stored as a scrypt hash
+(`data/auth.json`), HMAC-signed HttpOnly session cookies (30 days,
+`Secure` behind HTTPS), and a 15-minute lockout after 8 failed attempts.
 
 ## Privacy & security
 

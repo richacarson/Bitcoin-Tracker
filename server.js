@@ -10,11 +10,58 @@ import { fetchCurrentPrice, getDailyPrices } from './lib/prices.js';
 import { loadImports } from './lib/imports.js';
 import { computePortfolio } from './lib/costbasis.js';
 import { buildSampleData } from './lib/sample.js';
+import * as auth from './lib/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE = path.join(__dirname, 'data', 'cache.json');
 const app = express();
+app.set('trust proxy', 1); // honor X-Forwarded-Proto behind a hosting proxy
 app.use(express.json());
+
+// ── Auth (everything below the public routes requires a session) ────────
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+app.get('/login', (req, res) => {
+  if (auth.verifyToken(auth.tokenFromRequest(req))) return res.redirect('/');
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({ username: auth.username(), configured: auth.passwordConfigured() });
+});
+
+app.post('/api/auth/setup', (req, res) => {
+  try {
+    if (auth.passwordConfigured()) return res.status(409).json({ error: 'Password is already set' });
+    auth.setPassword(req.body?.password);
+    res.setHeader('Set-Cookie', auth.sessionCookie(req, auth.issueToken(), 30 * 86400));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  if (!auth.passwordConfigured()) return res.status(409).json({ error: 'No password set yet — reload to run first-time setup' });
+  if (!auth.loginAllowed(req.ip)) return res.status(429).json({ error: 'Too many attempts — try again in 15 minutes' });
+  const ok = auth.verifyPassword(req.body?.username || '', req.body?.password || '');
+  auth.recordLogin(req.ip, ok);
+  if (!ok) return res.status(401).json({ error: 'Wrong username or password' });
+  res.setHeader('Set-Cookie', auth.sessionCookie(req, auth.issueToken(), 30 * 86400));
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.setHeader('Set-Cookie', auth.sessionCookie(req, '', 0));
+  res.json({ ok: true });
+});
+
+app.use((req, res, next) => {
+  if (auth.verifyToken(auth.tokenFromRequest(req))) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Not signed in' });
+  res.redirect('/login');
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 let syncing = false;
