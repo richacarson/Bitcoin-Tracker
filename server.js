@@ -1,0 +1,171 @@
+import 'dotenv/config';
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { readJsonFile, writeJsonFile } from './lib/util.js';
+import { fetchKrakenTrades, fetchKrakenTransfers, fetchKrakenBalance, krakenConfigured } from './lib/kraken.js';
+import { fetchCoinbaseHistory, coinbaseConfigured } from './lib/coinbase.js';
+import { fetchOnchainBalance, phantomAddresses } from './lib/onchain.js';
+import { fetchCurrentPrice, getDailyPrices } from './lib/prices.js';
+import { loadImports } from './lib/imports.js';
+import { computePortfolio } from './lib/costbasis.js';
+import { buildSampleData } from './lib/sample.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CACHE_FILE = path.join(__dirname, 'data', 'cache.json');
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+let syncing = false;
+let priceCache = { at: 0, price: null };
+let onchainCache = { at: 0, result: null };
+
+async function currentPrice() {
+  if (Date.now() - priceCache.at < 60_000 && priceCache.price) return priceCache.price;
+  priceCache = { at: Date.now(), price: await fetchCurrentPrice() };
+  return priceCache.price;
+}
+
+async function onchain() {
+  const addresses = phantomAddresses();
+  if (!addresses.length) return null;
+  if (Date.now() - onchainCache.at < 300_000 && onchainCache.result) return onchainCache.result;
+  onchainCache = { at: Date.now(), result: await fetchOnchainBalance(addresses) };
+  return onchainCache.result;
+}
+
+function mergeById(existing, incoming) {
+  const map = new Map(existing.map((t) => [t.id, t]));
+  for (const t of incoming) map.set(t.id, t);
+  return [...map.values()];
+}
+
+// Pull fresh history from every configured exchange. Incremental for
+// Kraken (its rate limits make full re-pulls slow); full for Coinbase.
+async function sync() {
+  const cache = readJsonFile(CACHE_FILE, { trades: [], transfers: [], balances: {} });
+  const errors = [];
+
+  if (krakenConfigured()) {
+    try {
+      const lastKraken = cache.trades
+        .filter((t) => t.source === 'kraken')
+        .reduce((max, t) => Math.max(max, new Date(t.date).getTime()), 0);
+      const sinceSec = lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0;
+      cache.trades = mergeById(cache.trades, await fetchKrakenTrades(sinceSec));
+      cache.transfers = mergeById(cache.transfers || [], await fetchKrakenTransfers(sinceSec));
+      cache.balances.kraken = await fetchKrakenBalance();
+    } catch (err) {
+      errors.push(`Kraken: ${err.message}`);
+    }
+  }
+
+  if (coinbaseConfigured()) {
+    try {
+      const { trades, transfers, balance } = await fetchCoinbaseHistory();
+      cache.trades = mergeById(cache.trades, trades);
+      cache.transfers = mergeById(cache.transfers || [], transfers);
+      cache.balances.coinbase = balance;
+    } catch (err) {
+      errors.push(`Coinbase: ${err.message}`);
+    }
+  }
+
+  cache.syncedAt = new Date().toISOString();
+  cache.errors = errors;
+  writeJsonFile(CACHE_FILE, cache);
+  return cache;
+}
+
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const errors = [];
+    let cache = readJsonFile(CACHE_FILE, null);
+    const anyExchange = krakenConfigured() || coinbaseConfigured();
+
+    // First visit with keys configured: sync inline so the page has data.
+    if (!cache && anyExchange && !syncing) {
+      syncing = true;
+      try { cache = await sync(); } finally { syncing = false; }
+    }
+
+    const imports = loadImports();
+    errors.push(...imports.errors, ...(cache?.errors || []));
+
+    let trades = [...(cache?.trades || []), ...imports.trades];
+    let transfers = [...(cache?.transfers || []), ...imports.transfers];
+    const balances = { ...(cache?.balances || {}) };
+
+    let onchainResult = null;
+    try {
+      onchainResult = await onchain();
+      if (onchainResult) balances.onchain = onchainResult.btc;
+    } catch (err) {
+      errors.push(`On-chain lookup: ${err.message}`);
+    }
+
+    const price = await currentPrice();
+    const demo = trades.length === 0 && !anyExchange;
+    const firstTs = trades.length
+      ? Math.min(...trades.map((t) => new Date(t.date).getTime()))
+      : Date.now() - 1200 * 86400000;
+    const dailyPrices = await getDailyPrices(firstTs - 86400000);
+
+    if (demo) {
+      const sample = buildSampleData(dailyPrices, price);
+      trades = sample.trades;
+      transfers = sample.transfers;
+      Object.assign(balances, sample.balances);
+    }
+
+    const portfolio = computePortfolio({ trades, transfers, dailyPrices, currentPrice: price, balances });
+
+    res.json({
+      ...portfolio,
+      onchainAddresses: onchainResult?.perAddress || [],
+      status: {
+        demo,
+        syncing,
+        syncedAt: cache?.syncedAt || null,
+        sources: {
+          kraken: krakenConfigured(),
+          coinbase: coinbaseConfigured(),
+          phantom: phantomAddresses().length > 0,
+          csvOrManual: imports.trades.length + imports.transfers.length > 0,
+        },
+        errors,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/sync', async (req, res) => {
+  if (syncing) return res.status(409).json({ error: 'Sync already running' });
+  syncing = true;
+  try {
+    const cache = await sync();
+    res.json({ syncedAt: cache.syncedAt, errors: cache.errors, trades: cache.trades.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    syncing = false;
+  }
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`₿ Bitcoin Tracker running at http://localhost:${port}`);
+  const configured = [
+    krakenConfigured() && 'Kraken',
+    coinbaseConfigured() && 'Coinbase',
+    phantomAddresses().length && 'Phantom on-chain',
+  ].filter(Boolean);
+  console.log(
+    configured.length
+      ? `Configured sources: ${configured.join(', ')}`
+      : 'No API keys configured yet — showing demo data. Copy .env.example to .env to connect your accounts.'
+  );
+});

@@ -1,0 +1,11 @@
+# Secrets — never commit API keys
+.env
+
+# Local data (synced history, price cache, your CSV exports)
+data/cache.json
+data/prices.json
+data/imports/*.csv
+data/manual.json
+
+node_modules/
+npm-debug.log*

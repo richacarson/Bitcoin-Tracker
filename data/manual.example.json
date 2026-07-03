@@ -1,0 +1,17 @@
+[
+  {
+    "date": "2021-03-15",
+    "type": "buy",
+    "btc": 0.05,
+    "usd": 2800,
+    "fee": 12.5,
+    "note": "Lump sum bought elsewhere — usd is the total paid including fees"
+  },
+  {
+    "date": "2022-11-20",
+    "type": "buy",
+    "btc": 0.1,
+    "usd": 1650,
+    "note": "fee is optional; type can be buy, sell, send, or receive"
+  }
+]
