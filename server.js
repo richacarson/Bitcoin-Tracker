@@ -113,7 +113,8 @@ async function sync() {
       const lastKraken = cache.trades
         .filter((t) => t.source === 'kraken')
         .reduce((max, t) => Math.max(max, new Date(t.date).getTime()), 0);
-      const sinceSec = lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0;
+      const cutoffSec = cfg.startDate ? Math.floor(new Date(cfg.startDate).getTime() / 1000) : 0;
+      const sinceSec = Math.max(lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0, cutoffSec);
       const ledger = await fetchKrakenLedger(cfg.kraken, sinceSec);
       cache.trades = mergeById(cache.trades, [
         ...(await fetchKrakenTrades(cfg.kraken, sinceSec)),
