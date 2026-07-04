@@ -10,8 +10,12 @@ const root = path.join(import.meta.dirname, '..');
 const out = path.join(root, 'docs');
 fs.mkdirSync(out, { recursive: true });
 
-for (const file of ['index.html', 'app.js', 'style.css', 'login.html']) {
+for (const file of ['index.html', 'app.js', 'style.css', 'login.html', 'manifest.webmanifest']) {
   fs.copyFileSync(path.join(root, 'public', file), path.join(out, file));
+}
+fs.mkdirSync(path.join(out, 'icons'), { recursive: true });
+for (const icon of fs.readdirSync(path.join(root, 'public', 'icons'))) {
+  fs.copyFileSync(path.join(root, 'public', 'icons', icon), path.join(out, 'icons', icon));
 }
 fs.writeFileSync(
   path.join(out, 'config.js'),

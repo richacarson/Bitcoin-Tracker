@@ -44,11 +44,17 @@ function svgEl(tag, attrs) {
 // ── Scales & ticks ──────────────────────────────────────────────────────
 function niceTicks(min, max, count = 5) {
   if (min === max) { min = min * 0.9; max = max * 1.1 || 1; }
-  const span = max - min;
-  const step0 = Math.pow(10, Math.floor(Math.log10(span / count)));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * step0).find((s) => span / s <= count) || step0 * 10;
+  const step0 = Math.pow(10, Math.floor(Math.log10((max - min) / count)));
+  const candidates = [1, 2, 2.5, 5, 10, 20, 25].map((m) => m * step0);
+  // Pick the finest step whose ticks bracket the data in <= count intervals.
+  const step =
+    candidates.find((s) => Math.ceil(max / s) - Math.floor(min / s) <= count) ||
+    candidates[candidates.length - 1];
   const ticks = [];
-  for (let v = Math.ceil(min / step) * step; v <= max + step / 1e6; v += step) ticks.push(v);
+  for (let v = Math.floor(min / step) * step; ; v += step) {
+    ticks.push(v);
+    if (v >= max - step / 1e6) break;
+  }
   return ticks;
 }
 function timeTicks(t0, t1, count = 6) {
@@ -87,6 +93,8 @@ function showTooltip(clientX, clientY, dateText, rows) {
   let x = clientX + 14, y = clientY + 14;
   if (x + rect.width > window.innerWidth - 8) x = clientX - rect.width - 14;
   if (y + rect.height > window.innerHeight - 8) y = clientY - rect.height - 14;
+  x = Math.max(8, x);
+  y = Math.max(8, y);
   tt.style.left = x + 'px';
   tt.style.top = y + 'px';
 }
@@ -105,12 +113,13 @@ function chartFrame(container, seriesMeta) {
     legend.appendChild(item);
   }
   container.appendChild(legend);
-  const width = Math.max(320, container.clientWidth);
-  const height = 320;
-  const m = { l: 62, r: 96, t: 10, b: 30 };
+  const width = Math.max(300, container.clientWidth);
+  const compact = width < 560; // phones: drop the end-label gutter, tighter axes
+  const height = compact ? 260 : 320;
+  const m = compact ? { l: 56, r: 14, t: 10, b: 26 } : { l: 62, r: 96, t: 10, b: 30 };
   const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img' });
   container.appendChild(svg);
-  return { svg, width, height, m, plotW: width - m.l - m.r, plotH: height - m.t - m.b };
+  return { svg, width, height, m, compact, plotW: width - m.l - m.r, plotH: height - m.t - m.b };
 }
 
 function drawAxes(f, tExt, yTicks, yFmt) {
@@ -124,7 +133,7 @@ function drawAxes(f, tExt, yTicks, yFmt) {
   }
   svg.appendChild(svgEl('line', { x1: m.l, x2: m.l + plotW, y1: m.t + plotH, y2: m.t + plotH, stroke: 'var(--baseline)', 'stroke-width': 1 }));
   const span = tExt[1] - tExt[0];
-  for (const t of timeTicks(tExt[0], tExt[1])) {
+  for (const t of timeTicks(tExt[0], tExt[1], Math.max(3, Math.round(plotW / 110)))) {
     const x = m.l + ((t - tExt[0]) / span) * plotW;
     const label = svgEl('text', { x, y: m.t + plotH + 18, 'text-anchor': 'middle', class: 'axis-text' });
     label.textContent = fmtTick(t, span);
@@ -138,6 +147,7 @@ function linePath(points, sx, sy) {
 
 // End labels with simple collision handling (push apart + leader lines).
 function endLabels(f, labels) {
+  if (f.compact) return;
   labels.sort((a, b) => a.y - b.y);
   for (let i = 1; i < labels.length; i++) {
     if (labels[i].y - labels[i - 1].y < 15) labels[i].y = labels[i - 1].y + 15;
@@ -249,7 +259,7 @@ function buysChart(container, dots, lines, yFmt) {
   const allT = [...dots.map((d) => d.t), ...lines.flatMap((l) => l.points.map((p) => p[0]))];
   if (!allY.length) { container.appendChild(el('p', 'muted', 'No buys in this range.')); return; }
   const tExt = [Math.min(...allT), Math.max(...allT)];
-  const yTicks = niceTicks(Math.min(...allY) * 0.95, Math.max(...allY) * 1.02);
+  const yTicks = niceTicks(Math.min(...allY), Math.max(...allY));
   const yExt = [yTicks[0], yTicks[yTicks.length - 1]];
   const sx = (t) => f.m.l + ((t - tExt[0]) / (tExt[1] - tExt[0] || 1)) * f.plotW;
   const sy = (v) => f.m.t + f.plotH - ((v - yExt[0]) / (yExt[1] - yExt[0] || 1)) * f.plotH;

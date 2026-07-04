@@ -198,3 +198,54 @@ tr:last-child td { border-bottom: 0; }
 .footer .err { color: var(--bad-text); }
 .footer p { margin: 4px 0; }
 .muted { color: var(--text-muted); font-size: 12.5px; }
+
+/* ── Mobile (phones) ── */
+@media (max-width: 640px) {
+  .viz-root { padding: 14px 12px 40px; }
+  body { font-size: 15px; }
+
+  /* Top bar: title on its own line, big tap targets */
+  .topbar { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 12px; }
+  h1 { font-size: 19px; }
+  .topbar-actions { justify-content: flex-start; }
+  .btn { padding: 10px 14px; min-height: 42px; }
+  .segmented button { padding: 9px 13px; }
+  .segmented.small button { padding: 7px 12px; }
+
+  /* Tiles: two columns, hero across the full row */
+  .tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { padding: 12px 14px; }
+  .tile.hero { grid-column: 1 / -1; }
+  .tile.hero .value { font-size: 38px; }
+  .tile .value { font-size: 19px; }
+  .tile .label, .tile .delta, .tile .sub { font-size: 13px; }
+
+  .card { padding: 14px 12px; }
+  .card h2 { font-size: 15px; }
+  .two-col { gap: 12px; }
+
+  /* Venue rows: name on its own line, bar + value below */
+  .loc-row { grid-template-columns: 1fr auto; row-gap: 4px; padding: 8px 0; }
+  .loc-name { grid-column: 1 / -1; min-width: 0; font-size: 14px; }
+  .loc-val { font-size: 13.5px; }
+  .kv-row { font-size: 14px; padding: 6px 0; }
+
+  /* Connections: readable rows, iOS-safe inputs (16px stops zoom-on-focus) */
+  .conn-row { flex-wrap: wrap; row-gap: 2px; padding: 8px 0; font-size: 14px; }
+  .conn-name { min-width: 0; }
+  .conn-state { flex-basis: 100%; padding-left: 18px; font-size: 13px; }
+  .form-grid input, .form-grid textarea { font-size: 16px; padding: 11px 12px; }
+  #conn-details summary { padding: 6px 0; font-size: 14px; }
+
+  /* Charts and tables */
+  .chart-legend { gap: 12px; }
+  .legend-item { font-size: 13px; }
+  .filter-row { margin: 16px 0 10px; }
+  .table-wrap { max-height: 360px; -webkit-overflow-scrolling: touch; }
+  table { font-size: 13.5px; }
+  th, td { padding: 8px 8px; }
+
+  .tooltip { font-size: 13.5px; max-width: 78vw; }
+  .footer, .muted { font-size: 13px; }
+  .banner { font-size: 13.5px; }
+}
