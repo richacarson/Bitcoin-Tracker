@@ -361,7 +361,13 @@ function rangeCutoff() {
 // ── Render ──────────────────────────────────────────────────────────────
 function tile(label, value, opts = {}) {
   const t = el('div', 'tile' + (opts.hero ? ' hero' : ''));
-  t.appendChild(el('div', 'label', label));
+  const lbl = el('div', 'label', label);
+  if (opts.live) {
+    const dot = el('span', 'live-dot');
+    dot.title = 'updates live';
+    lbl.appendChild(dot);
+  }
+  t.appendChild(lbl);
   t.appendChild(el('div', 'value', value));
   if (opts.delta) t.appendChild(el('div', 'delta ' + (opts.deltaDir || ''), opts.delta));
   if (opts.sub) t.appendChild(el('div', 'sub', opts.sub));
@@ -384,6 +390,7 @@ function renderTiles() {
     sub: 'per BTC, fees included',
   }));
   tiles.appendChild(tile('BTC price', fmtUsdFull(s.currentPrice), {
+    live: true,
     delta: s.avgCost > 0 ? fmtPct(((s.currentPrice - s.avgCost) / s.avgCost) * 100) + ' vs your avg' : null,
     deltaDir: s.currentPrice >= s.avgCost ? 'up' : 'down',
   }));
@@ -725,5 +732,39 @@ window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => { renderValueChart(); renderBuysChart(); }, 150);
 });
+
+// ── Live price: poll public exchange APIs directly from the browser ─────
+async function fetchSpotPrice() {
+  try {
+    const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
+    const j = await r.json();
+    return parseFloat(Object.values(j.result)[0].c[0]);
+  } catch {
+    const r = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+    const j = await r.json();
+    return parseFloat(j.data.amount);
+  }
+}
+
+function applyLivePrice(price) {
+  const s = state.data?.summary;
+  if (!s || !Number.isFinite(price) || price <= 0) return;
+  if (Math.abs(price - s.currentPrice) < 0.005) return;
+  const heldBasis = s.currentValue - s.unrealizedGain; // price-invariant
+  s.currentPrice = price;
+  s.currentValue = s.currentBtc * price;
+  s.unrealizedGain = s.currentValue - heldBasis;
+  s.unrealizedPct = s.costBasisUsd > 0 ? (s.unrealizedGain / s.costBasisUsd) * 100 : 0;
+  renderTiles();
+  renderLocations();
+  document.title = `${fmtUsd(price)} · Bitcoin Tracker`;
+}
+
+async function livePriceTick() {
+  if (document.hidden || !state.data) return;
+  try { applyLivePrice(await fetchSpotPrice()); } catch { /* transient network issues are fine */ }
+}
+setInterval(livePriceTick, 15000);
+document.addEventListener('visibilitychange', livePriceTick);
 
 load();
