@@ -395,14 +395,8 @@ function renderTiles() {
     deltaDir: s.currentPrice >= s.avgCost ? 'up' : 'down',
   }));
   tiles.appendChild(tile('Net invested', fmtUsd(s.netInvested), {
-    sub: `cost basis ${fmtUsd(s.costBasisUsd)} · fees ${fmtUsd(s.totalFeesUsd)}`,
+    sub: `cost basis ${fmtUsd(s.costBasisUsd)}`,
   }));
-  if (s.totalSellBtc > 0) {
-    tiles.appendChild(tile('Realized P/L', fmtUsd(s.realizedGain), {
-      delta: `${fmtBtc(s.totalSellBtc)} sold (FIFO)`,
-      deltaDir: s.realizedGain >= 0 ? 'up' : 'down',
-    }));
-  }
 }
 
 function renderLocations() {
@@ -600,7 +594,7 @@ function renderChrome() {
     const strong = el('strong', null, 'Demo data. ');
     banner.appendChild(strong);
     banner.appendChild(document.createTextNode(
-      'This is a sample portfolio so you can explore the dashboard. Open “Add or update connections” below to connect your real accounts — paste read-only API keys and your numbers replace the demo on the next sync.'));
+      'This is a sample portfolio so you can explore the dashboard. Open Settings (⚙, top right) to connect your real accounts — paste read-only API keys and your numbers replace the demo on the next sync.'));
     banner.hidden = false;
   } else banner.hidden = true;
 
@@ -691,6 +685,22 @@ $('conn-form').addEventListener('submit', async (e) => {
   }
 });
 
+// ── Settings view (Connections + Where it lives) ────────────────────────
+let currentView = 'dashboard';
+function setView(next) {
+  currentView = next;
+  $('view-dashboard').hidden = next !== 'dashboard';
+  $('view-settings').hidden = next !== 'settings';
+  $('settings-btn').classList.toggle('active', next === 'settings');
+  $('settings-btn').setAttribute('aria-pressed', String(next === 'settings'));
+  // Charts rendered while their container was hidden fall back to a
+  // minimum width — redraw them now that they're visible again.
+  if (next === 'dashboard' && state.data) { renderValueChart(); renderBuysChart(); }
+  window.scrollTo(0, 0);
+}
+$('settings-btn').addEventListener('click', () => setView(currentView === 'settings' ? 'dashboard' : 'settings'));
+$('settings-back').addEventListener('click', () => setView('dashboard'));
+
 $('logout-btn').addEventListener('click', async () => {
   localStorage.removeItem('btc_token');
   await fetch(API('api/auth/logout'), { method: 'POST' }).catch(() => {});
@@ -735,7 +745,10 @@ window.addEventListener('resize', () => {
   resizeTimer = setTimeout(() => { renderValueChart(); renderBuysChart(); }, 150);
 });
 
-// ── Live price: poll public exchange APIs directly from the browser ─────
+// ── Live price ──────────────────────────────────────────────────────────
+// Primary: Kraken's public WebSocket ticker (no key needed) streams every
+// price change the moment it happens. Fallback: poll public REST APIs
+// every 15s whenever the socket is down.
 async function fetchSpotPrice() {
   try {
     const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
@@ -748,6 +761,18 @@ async function fetchSpotPrice() {
   }
 }
 
+// Ticks can arrive several times a second — coalesce re-renders.
+let priceRenderQueued = false;
+function queuePriceRender() {
+  if (priceRenderQueued) return;
+  priceRenderQueued = true;
+  setTimeout(() => {
+    priceRenderQueued = false;
+    renderTiles();
+    renderLocations();
+  }, 300);
+}
+
 function applyLivePrice(price) {
   const s = state.data?.summary;
   if (!s || !Number.isFinite(price) || price <= 0) return;
@@ -757,13 +782,39 @@ function applyLivePrice(price) {
   s.currentValue = s.currentBtc * price;
   s.unrealizedGain = s.currentValue - heldBasis;
   s.unrealizedPct = s.costBasisUsd > 0 ? (s.unrealizedGain / s.costBasisUsd) * 100 : 0;
-  renderTiles();
-  renderLocations();
   document.title = `${fmtUsd(price)} · Bitcoin Tracker`;
+  queuePriceRender();
 }
+
+let priceWs = null;
+let priceWsDelay = 1000;
+function connectPriceStream() {
+  let ws;
+  try { ws = new WebSocket('wss://ws.kraken.com/v2'); } catch { return; }
+  priceWs = ws;
+  ws.onopen = () => {
+    priceWsDelay = 1000;
+    ws.send(JSON.stringify({ method: 'subscribe', params: { channel: 'ticker', symbol: ['BTC/USD'] } }));
+  };
+  ws.onmessage = (e) => {
+    try {
+      const m = JSON.parse(e.data);
+      const last = m.channel === 'ticker' && m.data && m.data[0] && m.data[0].last;
+      if (last) applyLivePrice(parseFloat(last));
+    } catch { /* ignore malformed frames */ }
+  };
+  ws.onclose = () => {
+    priceWs = null;
+    setTimeout(connectPriceStream, priceWsDelay);
+    priceWsDelay = Math.min(30000, priceWsDelay * 2); // back off, cap at 30s
+  };
+  ws.onerror = () => ws.close();
+}
+connectPriceStream();
 
 async function livePriceTick() {
   if (document.hidden || !state.data) return;
+  if (priceWs && priceWs.readyState === WebSocket.OPEN) return; // streaming already
   try { applyLivePrice(await fetchSpotPrice()); } catch { /* transient network issues are fine */ }
 }
 setInterval(livePriceTick, 15000);
