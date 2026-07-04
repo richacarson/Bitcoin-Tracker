@@ -27,6 +27,12 @@ app.get(['/login', '/login.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
+// Assets the login page and home-screen install need before sign-in.
+app.get(['/config.js', '/manifest.webmanifest'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', req.path));
+});
+app.use('/icons', express.static(path.join(__dirname, 'public', 'icons')));
+
 app.get('/api/auth/status', (req, res) => {
   res.json({
     username: auth.username(),
