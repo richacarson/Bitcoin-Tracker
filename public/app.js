@@ -583,6 +583,7 @@ function renderConnections() {
       form.elements.coinbasePrivateKey.placeholder = 'configured — paste to replace';
     }
     if (s.manualCount) form.elements.manual.placeholder = `${s.manualCount} entries saved — paste JSON to replace`;
+    if (s.startDate) form.elements.startDate.value = s.startDate;
   }).catch(() => {});
 }
 
@@ -662,7 +663,7 @@ $('conn-form').addEventListener('submit', async (e) => {
   const form = $('conn-form');
   const msg = $('conn-msg');
   const patch = {};
-  for (const name of ['krakenKey', 'krakenSecret', 'coinbaseKeyName', 'coinbasePrivateKey', 'phantomAddresses', 'manual']) {
+  for (const name of ['krakenKey', 'krakenSecret', 'coinbaseKeyName', 'coinbasePrivateKey', 'phantomAddresses', 'manual', 'startDate']) {
     const v = form.elements[name].value.trim();
     if (v) patch[name] = v; // only send what was entered; blanks leave settings unchanged
   }

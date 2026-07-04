@@ -168,7 +168,7 @@ function recordLogin(ip: string, ok: boolean) {
 
 // ── Settings (exchange keys, phantom addresses, manual entries) ─────────
 const SECRET_FIELDS = ['krakenKey', 'krakenSecret', 'coinbaseKeyName', 'coinbasePrivateKey'];
-const FIELDS = [...SECRET_FIELDS, 'phantomAddresses', 'manual'];
+const FIELDS = [...SECRET_FIELDS, 'phantomAddresses', 'manual', 'startDate'];
 async function getConfig() {
   const s = (await kvGet('settings')) || {};
   const addresses = Deno.env.get('PHANTOM_BTC_ADDRESSES') || s.phantomAddresses || '';
@@ -183,6 +183,7 @@ async function getConfig() {
     },
     phantomAddresses: addresses.split(',').map((a: string) => a.trim()).filter(Boolean),
     manual: Array.isArray(s.manual) ? s.manual : [],
+    startDate: s.startDate || '',
   };
 }
 async function saveSettings(patch: any) {
@@ -205,6 +206,7 @@ async function publicSettings() {
     coinbase: Boolean(cfg.coinbase.keyName && cfg.coinbase.privateKey),
     phantomAddresses: cfg.phantomAddresses.join(', '),
     manualCount: cfg.manual.length,
+    startDate: cfg.startDate,
   };
 }
 
@@ -573,11 +575,24 @@ async function dashboard() {
   if (!cache && anyExchange && !syncing) {
     syncing = true;
     try { cache = await sync(); } finally { syncing = false; }
+  } else if (cache && anyExchange && !syncing) {
+    // Stale data self-heals: kick a background re-sync, serve current data now.
+    const age = Date.now() - new Date(cache.syncedAt || 0).getTime();
+    if (age > 60 * 60 * 1000 && typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+      syncing = true;
+      (globalThis as any).EdgeRuntime.waitUntil(sync().catch(() => {}).finally(() => { syncing = false; }));
+    }
   }
   const settingsManual = normalizeManual(cfg.manual, 'settings-manual');
   errors.push(...(cache?.errors || []));
   let trades = [...(cache?.trades || []), ...settingsManual.trades];
   let transfers = [...(cache?.transfers || []), ...settingsManual.transfers];
+  // Optional history cutoff: everything before this date is ignored.
+  const startMs = cfg.startDate ? new Date(cfg.startDate).getTime() : 0;
+  if (startMs) {
+    trades = trades.filter((t: any) => new Date(t.date).getTime() >= startMs);
+    transfers = transfers.filter((t: any) => new Date(t.date).getTime() >= startMs);
+  }
   const balances = { ...(cache?.balances || {}) };
   let onchainResult = null;
   try {
