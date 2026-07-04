@@ -162,6 +162,12 @@ app.get('/api/dashboard', async (req, res) => {
 
     let trades = [...(cache?.trades || []), ...imports.trades, ...settingsManual.trades];
     let transfers = [...(cache?.transfers || []), ...imports.transfers, ...settingsManual.transfers];
+    // Optional history cutoff: everything before this date is ignored.
+    const startMs = cfg.startDate ? new Date(cfg.startDate).getTime() : 0;
+    if (startMs) {
+      trades = trades.filter((t) => new Date(t.date).getTime() >= startMs);
+      transfers = transfers.filter((t) => new Date(t.date).getTime() >= startMs);
+    }
     const balances = { ...(cache?.balances || {}) };
 
     let onchainResult = null;
