@@ -607,6 +607,7 @@ function renderChrome() {
   const footer = $('footer');
   footer.replaceChildren();
   const notes = [];
+  if (status.backfilling) notes.push('⏳ Still importing older exchange history in the background — refresh in a few minutes to see all of it.');
   if (summary.dedupedRecords > 0) notes.push(`${summary.dedupedRecords} duplicate record(s) merged across sources.`);
   if (summary.unmatchedSellBtc > 1e-8) notes.push(`⚠ Warning: ${fmtBtc(summary.unmatchedSellBtc)} sold without a matching buy record — cost basis may be incomplete. Import older history via CSV.`);
   notes.push('Cost basis is FIFO and fee-inclusive. Transfers to your own wallet (Phantom) are not sales and don\'t affect basis. Not tax advice.');

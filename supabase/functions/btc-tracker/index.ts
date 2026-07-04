@@ -212,7 +212,9 @@ async function publicSettings() {
 
 // ── Kraken client ────────────────────────────────────────────────────────
 const KRAKEN_HOST = 'https://api.kraken.com';
-const PAGE_DELAY_MS = 3000;
+// Starter-tier accounts decay 0.33 points/sec and history calls cost 2
+// points, so anything faster than one call per ~6s saturates the counter.
+const PAGE_DELAY_MS = 6500;
 function krakenSign(urlPath: string, postData: string, nonce: string, secretB64: string) {
   const digest = sha256(te.encode(nonce + postData));
   return bytesToB64(hmac(sha512, b64ToBytes(secretB64), concatBytes(te.encode(urlPath), digest)));
@@ -233,11 +235,13 @@ async function krakenPrivate(creds: any, endpoint: string, params: Record<string
     });
     const body = await res.json();
     const errors = body.error || [];
-    if (errors.some((e: string) => e.includes('Rate limit'))) { await sleep(5000 * (attempt + 1)); continue; }
+    if (errors.some((e: string) => e.includes('Rate limit'))) { await sleep(15000 * (attempt + 1)); continue; }
     if (errors.length) throw new Error(`Kraken ${endpoint}: ${errors.join(', ')}`);
     return body.result;
   }
-  throw new Error(`Kraken ${endpoint}: rate limited after retries`);
+  const err: any = new Error(`Kraken ${endpoint}: rate limited after retries`);
+  err.rateLimited = true;
+  throw err;
 }
 const USD_QUOTES = ['ZUSD', 'USD', 'USDT', 'USDC'];
 function isBtcUsdPair(pair: string) {
@@ -279,20 +283,32 @@ const isUsdAsset = (a: string) => ['ZUSD', 'USD', 'USDT', 'USDC'].includes(a) ||
 // refid: a fiat `spend` and a BTC `receive` (a sale is the mirror image).
 // Orderbook trades appear in the ledger as type `trade` and are skipped
 // here because TradesHistory already covers them.
-async function fetchKrakenLedger(creds: any, sinceSec = 0) {
+// Crawl a time window of the ledger newest-first, spending at most
+// `budget` pages. Rate-limit exhaustion returns what was collected so far
+// instead of throwing — the caller persists a cursor and resumes later.
+async function crawlLedger(creds: any, startSec: number, endSec: number, budget: number) {
   const rows: any[] = [];
-  let ofs = 0;
-  for (;;) {
-    const params: Record<string, string> = { ofs: String(ofs) };
-    if (sinceSec) params.start = String(sinceSec);
-    const result = await krakenPrivate(creds, 'Ledgers', params);
-    const entries = Object.entries(result.ledger || {});
-    for (const [lid, l] of entries as [string, any][]) rows.push({ lid, ...l });
-    ofs += entries.length;
-    if (entries.length === 0 || ofs >= (result.count || 0)) break;
-    await sleep(PAGE_DELAY_MS);
+  let ofs = 0, pagesUsed = 0, exhausted = false;
+  try {
+    while (pagesUsed < budget) {
+      const params: Record<string, string> = { ofs: String(ofs) };
+      if (startSec > 0) params.start = String(startSec);
+      if (endSec > 0) params.end = String(endSec);
+      const result = await krakenPrivate(creds, 'Ledgers', params);
+      pagesUsed++;
+      const entries = Object.entries(result.ledger || {});
+      for (const [lid, l] of entries as [string, any][]) rows.push({ lid, ...l });
+      ofs += entries.length;
+      if (entries.length === 0 || ofs >= (result.count || 0)) { exhausted = true; break; }
+      await sleep(PAGE_DELAY_MS);
+    }
+  } catch (err: any) {
+    if (!err.rateLimited) throw err;
   }
+  return { rows, exhausted, pagesUsed };
+}
 
+function parseLedgerRows(rows: any[]) {
   const trades: any[] = [];
   const transfers: any[] = [];
   const byRefid = new Map<string, any[]>();
@@ -537,17 +553,37 @@ async function sync() {
   const errors: string[] = [];
   if (krakenConfigured(cfg.kraken)) {
     try {
-      const lastKraken = cache.trades
-        .filter((t: any) => t.source === 'kraken')
-        .reduce((max: number, t: any) => Math.max(max, new Date(t.date).getTime()), 0);
-      const sinceSec = lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0;
-      const ledger = await fetchKrakenLedger(cfg.kraken, sinceSec);
-      cache.trades = mergeById(cache.trades, [
-        ...(await fetchKrakenTrades(cfg.kraken, sinceSec)),
-        ...ledger.trades,
-      ]);
-      cache.transfers = mergeById(cache.transfers || [], ledger.transfers);
+      const cutoffSec = cfg.startDate ? Math.floor(new Date(cfg.startDate).getTime() / 1000) : 0;
+      const cur = cache.krakenCursor || { newestSec: 0, oldestSec: 0, complete: false };
+      const OVERLAP = 3600; // re-fetch an hour of overlap so refid pairs never split
+      let budget = 12; // pages per run — keeps a sync well inside the wall clock
+      const rows: any[] = [];
+
+      // Top-up anything newer than what we've already ingested.
+      if (cur.newestSec) {
+        const r = await crawlLedger(cfg.kraken, cur.newestSec - OVERLAP, 0, budget);
+        rows.push(...r.rows);
+        budget -= r.pagesUsed;
+      }
+      // Backfill older history down to the cutoff, resuming where we left off.
+      if (!cur.complete && budget > 0) {
+        const endSec = cur.oldestSec ? cur.oldestSec + OVERLAP : 0;
+        const r = await crawlLedger(cfg.kraken, cutoffSec, endSec, budget);
+        rows.push(...r.rows);
+        if (r.rows.length) cur.oldestSec = Math.min(...r.rows.map((x) => Number(x.time)));
+        if (r.exhausted) cur.complete = true;
+      }
+      if (rows.length) cur.newestSec = Math.max(cur.newestSec, ...rows.map((x) => Number(x.time)));
+      cache.krakenCursor = cur;
+
+      const parsed = parseLedgerRows(rows);
+      const orderbook = await fetchKrakenTrades(cfg.kraken, Math.max(cutoffSec, cur.oldestSec || 0) || cutoffSec);
+      cache.trades = mergeById(cache.trades, [...orderbook, ...parsed.trades]);
+      cache.transfers = mergeById(cache.transfers || [], parsed.transfers);
       cache.balances.kraken = await fetchKrakenBalance(cfg.kraken);
+      if (!cur.complete) {
+        errors.push('Kraken history import is still in progress — refresh in a few minutes for older buys.');
+      }
     } catch (err: any) {
       errors.push(`Kraken: ${err.message}`);
     }
@@ -578,7 +614,8 @@ async function dashboard() {
   } else if (cache && anyExchange && !syncing) {
     // Stale data self-heals: kick a background re-sync, serve current data now.
     const age = Date.now() - new Date(cache.syncedAt || 0).getTime();
-    if (age > 60 * 60 * 1000 && typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+    const staleMs = cache.krakenCursor && !cache.krakenCursor.complete ? 2 * 60 * 1000 : 60 * 60 * 1000;
+    if (age > staleMs && typeof (globalThis as any).EdgeRuntime !== 'undefined') {
       syncing = true;
       (globalThis as any).EdgeRuntime.waitUntil(sync().catch(() => {}).finally(() => { syncing = false; }));
     }
@@ -621,6 +658,7 @@ async function dashboard() {
       demo,
       syncing,
       syncedAt: cache?.syncedAt || null,
+      backfilling: Boolean(anyExchange && cache?.krakenCursor && !cache.krakenCursor.complete),
       sources: {
         kraken: krakenConfigured(cfg.kraken),
         coinbase: coinbaseConfigured(cfg.coinbase),
