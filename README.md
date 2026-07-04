@@ -118,51 +118,29 @@ different pocket."
 
 ## Going live (hosted, password-protected)
 
-The app is ready to deploy anywhere that runs Node or Docker. The login page
-protects everything; always deploy behind HTTPS (all the hosts below provide
-it automatically).
+The app is deployed in two halves:
 
-**Render (recommended, simplest):**
+- **API + storage — Supabase (already live).** The whole backend runs as the
+  `btc-tracker` edge function; your password hash, exchange keys, synced
+  history, and price cache live in the `btc_tracker_state` table
+  (service-role only — never readable through the public API). Redeploy
+  after code changes with `node scripts/build-edge.mjs` and push the
+  `supabase/functions/btc-tracker` folder via the Supabase CLI or MCP.
+  Note: Supabase blocks serving HTML from its shared domain (anti-phishing),
+  which is why the UI is hosted separately.
+- **UI — GitHub Pages (static, in `docs/`).** Built by
+  `node scripts/build-pages.mjs`, which points `config.js` at the edge
+  function. To enable: make the repo public, then Settings → Pages →
+  Deploy from a branch → `main` + `/docs`. The dashboard appears at
+  `https://<user>.github.io/Bitcoin-Tracker/`.
 
-1. Push this repo to GitHub.
-2. In render.com: **New → Blueprint**, pick the repo — `render.yaml` sets
-   everything up, including a 1 GB persistent disk for `data/` (so your
-   password, synced history, and caches survive deploys).
-3. In the service's **Environment** tab, add your secrets:
-   `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, `COINBASE_API_KEY_NAME`,
-   `COINBASE_API_PRIVATE_KEY`, `PHANTOM_BTC_ADDRESSES`.
-4. Open the URL Render gives you — the first visit shows the
-   **create password** screen.
+Sign-in uses bearer tokens (localStorage + `Authorization` header) rather
+than cookies, since the UI and API are on different origins. Tokens are
+HMAC-signed server-side, expire after 30 days, and every API route requires
+one. The repo is safe to make public: no secrets are committed — keys are
+pasted into the Connections panel and stored in Supabase.
 
-**Railway / Fly.io / any Docker host:** deploy with the included
-`Dockerfile` and mount a volume at `/app/data`. Set the same env vars.
-
-**Hosts without a persistent disk** (e.g. Render's free tier): set
-`APP_PASSWORD` and `SESSION_SECRET` env vars — the password then lives in
-the environment instead of on disk, and the app just re-syncs history after
-each deploy.
-
-Login details: single user, password stored as a scrypt hash
-(`data/auth.json`), HMAC-signed HttpOnly session cookies (30 days,
-`Secure` behind HTTPS), and a 15-minute lockout after 8 failed attempts.
+**Alternative — Render (~$7/mo):** run the full Node app in one place with
+`render.yaml` (New → Blueprint). Repo can stay private; Supabase not needed.
 
 ## Privacy & security
-
-- Keys live in `.env` (gitignored) and never leave your machine except to
-  call Kraken/Coinbase directly over HTTPS.
-- All keys are read-only; the app has no ability to trade or move funds.
-- The browser only ever receives computed numbers, never credentials.
-- Synced history and price data are cached in `data/` (gitignored).
-
-## Project layout
-
-```
-server.js          Express server + sync orchestration
-lib/kraken.js      Kraken private API (trades, ledger, balance)
-lib/coinbase.js    Coinbase CDP-key API (buys/sells/sends, balance)
-lib/onchain.js     mempool.space balance for Phantom addresses
-lib/prices.js      current price + daily history (cached)
-lib/imports.js     CSV + manual-entry ingestion
-lib/costbasis.js   FIFO cost-basis engine
-public/            the dashboard (vanilla JS, no build step)
-```

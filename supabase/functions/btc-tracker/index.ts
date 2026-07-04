@@ -143,6 +143,8 @@ async function verifyToken(token: string | null) {
   return Number.isFinite(expires) && Date.now() < expires;
 }
 function tokenFromRequest(req: Request) {
+  const bearer = (req.headers.get('authorization') || '').match(/^Bearer\s+(.+)$/i);
+  if (bearer) return bearer[1];
   const cookies = req.headers.get('cookie') || '';
   const match = cookies.split(/;\s*/).find((c) => c.startsWith(COOKIE + '='));
   return match ? match.slice(COOKIE.length + 1) : null;
@@ -566,8 +568,17 @@ async function dashboard() {
 }
 
 // ── HTTP routing ─────────────────────────────────────────────────────────
+// Static UI may be hosted on another origin (e.g. GitHub Pages). Auth rides
+// the Authorization header (never ambient cookies), so a permissive origin
+// does not enable CSRF; the token is still required for every request.
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'authorization, content-type',
+  'access-control-max-age': '86400',
+};
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
+  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...CORS, ...headers } });
 const CONTENT_TYPES: Record<string, string> = {
   html: 'text/html; charset=utf-8',
   js: 'text/javascript; charset=utf-8',
@@ -587,6 +598,7 @@ Deno.serve(async (req: Request) => {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
 
   try {
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (p === '/healthz') return json({ ok: true });
 
     if (p === '/api/auth/status') {
@@ -606,7 +618,8 @@ Deno.serve(async (req: Request) => {
       } catch (err: any) {
         return json({ error: err.message }, 400);
       }
-      return json({ ok: true }, 200, { 'set-cookie': cookieHeader(await issueToken(), SESSION_DAYS * 86400) });
+      const token = await issueToken();
+      return json({ ok: true, token }, 200, { 'set-cookie': cookieHeader(token, SESSION_DAYS * 86400) });
     }
     if (p === '/api/auth/login' && req.method === 'POST') {
       const rec = await getAuthRecord();
@@ -616,12 +629,14 @@ Deno.serve(async (req: Request) => {
       const ok = await verifyPassword(body?.username || '', body?.password || '');
       recordLogin(ip, ok);
       if (!ok) return json({ error: 'Wrong username or password' }, 401);
-      return json({ ok: true }, 200, { 'set-cookie': cookieHeader(await issueToken(), SESSION_DAYS * 86400) });
+      const token = await issueToken();
+      return json({ ok: true, token }, 200, { 'set-cookie': cookieHeader(token, SESSION_DAYS * 86400) });
     }
     if (p === '/api/auth/logout' && req.method === 'POST') {
       return json({ ok: true }, 200, { 'set-cookie': cookieHeader('', 0) });
     }
-    if (p === '/login') return asset('login.html');
+    if (p === '/login' || p === '/login.html') return asset('login.html');
+    if (p === '/config.js') return asset('config.js');
 
     // Everything below requires a session.
     if (!(await verifyToken(tokenFromRequest(req)))) {

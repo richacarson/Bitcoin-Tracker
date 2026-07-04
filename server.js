@@ -23,8 +23,7 @@ app.use(express.json());
 // ── Auth (everything below the public routes requires a session) ────────
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-app.get('/login', (req, res) => {
-  if (auth.verifyToken(auth.tokenFromRequest(req))) return res.redirect('/');
+app.get(['/login', '/login.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -40,8 +39,9 @@ app.post('/api/auth/setup', (req, res) => {
   try {
     if (auth.passwordConfigured()) return res.status(409).json({ error: 'Password is already set' });
     auth.setPassword(req.body?.password);
-    res.setHeader('Set-Cookie', auth.sessionCookie(req, auth.issueToken(), 30 * 86400));
-    res.json({ ok: true });
+    const token = auth.issueToken();
+    res.setHeader('Set-Cookie', auth.sessionCookie(req, token, 30 * 86400));
+    res.json({ ok: true, token });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -53,8 +53,9 @@ app.post('/api/auth/login', (req, res) => {
   const ok = auth.verifyPassword(req.body?.username || '', req.body?.password || '');
   auth.recordLogin(req.ip, ok);
   if (!ok) return res.status(401).json({ error: 'Wrong username or password' });
-  res.setHeader('Set-Cookie', auth.sessionCookie(req, auth.issueToken(), 30 * 86400));
-  res.json({ ok: true });
+  const token = auth.issueToken();
+  res.setHeader('Set-Cookie', auth.sessionCookie(req, token, 30 * 86400));
+  res.json({ ok: true, token });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -65,7 +66,7 @@ app.post('/api/auth/logout', (req, res) => {
 app.use((req, res, next) => {
   if (auth.verifyToken(auth.tokenFromRequest(req))) return next();
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Not signed in' });
-  res.redirect('/login');
+  res.redirect('/login.html');
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

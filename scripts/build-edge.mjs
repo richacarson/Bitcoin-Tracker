@@ -12,7 +12,7 @@ for (const file of ['costbasis.js', 'sample.js', 'manual.js', 'dates.js']) {
 }
 
 const assets = {};
-for (const file of ['index.html', 'app.js', 'style.css', 'login.html']) {
+for (const file of ['index.html', 'app.js', 'style.css', 'login.html', 'config.js']) {
   assets[file] = fs.readFileSync(path.join(root, 'public', file), 'utf8');
 }
 fs.writeFileSync(
