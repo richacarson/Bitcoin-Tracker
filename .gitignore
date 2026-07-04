@@ -10,3 +10,4 @@ data/manual.json
 
 node_modules/
 npm-debug.log*
+data/webauthn.json
