@@ -5,7 +5,9 @@ import { fileURLToPath } from 'url';
 import { readJsonFile, writeJsonFile } from './lib/util.js';
 import { fetchKrakenTrades, fetchKrakenTransfers, fetchKrakenBalance, krakenConfigured } from './lib/kraken.js';
 import { fetchCoinbaseHistory, coinbaseConfigured } from './lib/coinbase.js';
-import { fetchOnchainBalance, phantomAddresses } from './lib/onchain.js';
+import { fetchOnchainBalance } from './lib/onchain.js';
+import { getConfig, saveSettings, publicSettings } from './lib/config.js';
+import { normalizeManual } from './lib/manual.js';
 import { fetchCurrentPrice, getDailyPrices } from './lib/prices.js';
 import { loadImports } from './lib/imports.js';
 import { computePortfolio } from './lib/costbasis.js';
@@ -27,7 +29,11 @@ app.get('/login', (req, res) => {
 });
 
 app.get('/api/auth/status', (req, res) => {
-  res.json({ username: auth.username(), configured: auth.passwordConfigured() });
+  res.json({
+    username: auth.username(),
+    configured: auth.passwordConfigured(),
+    authed: auth.verifyToken(auth.tokenFromRequest(req)),
+  });
 });
 
 app.post('/api/auth/setup', (req, res) => {
@@ -75,7 +81,7 @@ async function currentPrice() {
 }
 
 async function onchain() {
-  const addresses = phantomAddresses();
+  const addresses = getConfig().phantomAddresses;
   if (!addresses.length) return null;
   if (Date.now() - onchainCache.at < 300_000 && onchainCache.result) return onchainCache.result;
   onchainCache = { at: Date.now(), result: await fetchOnchainBalance(addresses) };
@@ -91,26 +97,27 @@ function mergeById(existing, incoming) {
 // Pull fresh history from every configured exchange. Incremental for
 // Kraken (its rate limits make full re-pulls slow); full for Coinbase.
 async function sync() {
+  const cfg = getConfig();
   const cache = readJsonFile(CACHE_FILE, { trades: [], transfers: [], balances: {} });
   const errors = [];
 
-  if (krakenConfigured()) {
+  if (krakenConfigured(cfg.kraken)) {
     try {
       const lastKraken = cache.trades
         .filter((t) => t.source === 'kraken')
         .reduce((max, t) => Math.max(max, new Date(t.date).getTime()), 0);
       const sinceSec = lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0;
-      cache.trades = mergeById(cache.trades, await fetchKrakenTrades(sinceSec));
-      cache.transfers = mergeById(cache.transfers || [], await fetchKrakenTransfers(sinceSec));
-      cache.balances.kraken = await fetchKrakenBalance();
+      cache.trades = mergeById(cache.trades, await fetchKrakenTrades(cfg.kraken, sinceSec));
+      cache.transfers = mergeById(cache.transfers || [], await fetchKrakenTransfers(cfg.kraken, sinceSec));
+      cache.balances.kraken = await fetchKrakenBalance(cfg.kraken);
     } catch (err) {
       errors.push(`Kraken: ${err.message}`);
     }
   }
 
-  if (coinbaseConfigured()) {
+  if (coinbaseConfigured(cfg.coinbase)) {
     try {
-      const { trades, transfers, balance } = await fetchCoinbaseHistory();
+      const { trades, transfers, balance } = await fetchCoinbaseHistory(cfg.coinbase);
       cache.trades = mergeById(cache.trades, trades);
       cache.transfers = mergeById(cache.transfers || [], transfers);
       cache.balances.coinbase = balance;
@@ -128,8 +135,9 @@ async function sync() {
 app.get('/api/dashboard', async (req, res) => {
   try {
     const errors = [];
+    const cfg = getConfig();
     let cache = readJsonFile(CACHE_FILE, null);
-    const anyExchange = krakenConfigured() || coinbaseConfigured();
+    const anyExchange = krakenConfigured(cfg.kraken) || coinbaseConfigured(cfg.coinbase);
 
     // First visit with keys configured: sync inline so the page has data.
     if (!cache && anyExchange && !syncing) {
@@ -138,10 +146,11 @@ app.get('/api/dashboard', async (req, res) => {
     }
 
     const imports = loadImports();
+    const settingsManual = normalizeManual(cfg.manual, 'settings-manual');
     errors.push(...imports.errors, ...(cache?.errors || []));
 
-    let trades = [...(cache?.trades || []), ...imports.trades];
-    let transfers = [...(cache?.transfers || []), ...imports.transfers];
+    let trades = [...(cache?.trades || []), ...imports.trades, ...settingsManual.trades];
+    let transfers = [...(cache?.transfers || []), ...imports.transfers, ...settingsManual.transfers];
     const balances = { ...(cache?.balances || {}) };
 
     let onchainResult = null;
@@ -176,16 +185,34 @@ app.get('/api/dashboard', async (req, res) => {
         syncing,
         syncedAt: cache?.syncedAt || null,
         sources: {
-          kraken: krakenConfigured(),
-          coinbase: coinbaseConfigured(),
-          phantom: phantomAddresses().length > 0,
-          csvOrManual: imports.trades.length + imports.transfers.length > 0,
+          kraken: krakenConfigured(cfg.kraken),
+          coinbase: coinbaseConfigured(cfg.coinbase),
+          phantom: cfg.phantomAddresses.length > 0,
+          csvOrManual:
+            imports.trades.length + imports.transfers.length + cfg.manual.length > 0,
         },
         errors,
       },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/settings', (req, res) => {
+  res.json(publicSettings());
+});
+
+app.post('/api/settings', (req, res) => {
+  try {
+    const patch = { ...req.body };
+    if (typeof patch.manual === 'string') {
+      patch.manual = patch.manual.trim() ? JSON.parse(patch.manual) : '';
+    }
+    saveSettings(patch);
+    res.json(publicSettings());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -205,14 +232,15 @@ app.post('/api/sync', async (req, res) => {
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`₿ Bitcoin Tracker running at http://localhost:${port}`);
+  const cfg = getConfig();
   const configured = [
-    krakenConfigured() && 'Kraken',
-    coinbaseConfigured() && 'Coinbase',
-    phantomAddresses().length && 'Phantom on-chain',
+    krakenConfigured(cfg.kraken) && 'Kraken',
+    coinbaseConfigured(cfg.coinbase) && 'Coinbase',
+    cfg.phantomAddresses.length && 'Phantom on-chain',
   ].filter(Boolean);
   console.log(
     configured.length
       ? `Configured sources: ${configured.join(', ')}`
-      : 'No API keys configured yet — showing demo data. Copy .env.example to .env to connect your accounts.'
+      : 'No sources connected yet — showing demo data. Add keys in the dashboard (Connections) or via .env.'
   );
 });

@@ -529,6 +529,41 @@ function renderTxTable() {
     ]));
 }
 
+function renderConnections() {
+  const box = $('conn-status');
+  box.replaceChildren();
+  const { sources, syncedAt, demo } = state.data.status;
+  const rows = [
+    ['Kraken', sources.kraken, 'daily buys, transfers, balance'],
+    ['Coinbase', sources.coinbase, 'early purchases, balance'],
+    ['Phantom (on-chain)', sources.phantom, 'self-custody balance'],
+    ['CSV / manual entries', sources.csvOrManual, 'lump sums, old history'],
+  ];
+  for (const [name, on, what] of rows) {
+    const row = el('div', 'conn-row');
+    row.appendChild(el('span', 'conn-dot' + (on ? ' on' : '')));
+    row.appendChild(el('span', 'conn-name', name));
+    row.appendChild(el('span', 'conn-state', on ? 'Connected — ' + what : 'Not connected — ' + what));
+    box.appendChild(row);
+  }
+  if (demo || !(sources.kraken || sources.coinbase || sources.phantom || sources.csvOrManual)) {
+    $('conn-details').open = true;
+  }
+  fetch('api/settings').then((r) => r.json()).then((s) => {
+    const form = $('conn-form');
+    if (s.phantomAddresses) form.elements.phantomAddresses.value = s.phantomAddresses;
+    if (s.kraken) {
+      form.elements.krakenKey.placeholder = 'configured — paste to replace';
+      form.elements.krakenSecret.placeholder = 'configured — paste to replace';
+    }
+    if (s.coinbase) {
+      form.elements.coinbaseKeyName.placeholder = 'configured — paste to replace';
+      form.elements.coinbasePrivateKey.placeholder = 'configured — paste to replace';
+    }
+    if (s.manualCount) form.elements.manual.placeholder = `${s.manualCount} entries saved — paste JSON to replace`;
+  }).catch(() => {});
+}
+
 function renderChrome() {
   const { status, summary, locations } = state.data;
   const names = locations.map((l) => l.name.replace(' (on-chain)', '')).join(', ');
@@ -542,7 +577,7 @@ function renderChrome() {
     const strong = el('strong', null, 'Demo data. ');
     banner.appendChild(strong);
     banner.appendChild(document.createTextNode(
-      'This is a sample portfolio so you can explore the dashboard. To connect your real accounts, copy .env.example to .env and follow the API-key walkthrough in the README (about 5 minutes), then restart the server.'));
+      'This is a sample portfolio so you can explore the dashboard. Open “Add or update connections” below to connect your real accounts — paste read-only API keys and your numbers replace the demo on the next sync.'));
     banner.hidden = false;
   } else banner.hidden = true;
 
@@ -559,6 +594,7 @@ function renderChrome() {
 function renderAll() {
   if (!state.data) return;
   renderChrome();
+  renderConnections();
   renderTiles();
   renderLocations();
   renderActivity();
@@ -571,8 +607,8 @@ function renderAll() {
 async function load() {
   $('main').classList.add('refetching');
   try {
-    const res = await fetch('/api/dashboard');
-    if (res.status === 401) { location.href = '/login'; return; }
+    const res = await fetch('api/dashboard');
+    if (res.status === 401) { location.href = 'login'; return; }
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     state.data = data;
@@ -590,7 +626,7 @@ $('sync-btn').addEventListener('click', async () => {
   btn.textContent = 'Syncing…';
   $('main').classList.add('refetching');
   try {
-    await fetch('/api/sync', { method: 'POST' });
+    await fetch('api/sync', { method: 'POST' });
     await load();
   } finally {
     btn.disabled = false;
@@ -599,9 +635,41 @@ $('sync-btn').addEventListener('click', async () => {
   }
 });
 
+$('conn-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = $('conn-form');
+  const msg = $('conn-msg');
+  const patch = {};
+  for (const name of ['krakenKey', 'krakenSecret', 'coinbaseKeyName', 'coinbasePrivateKey', 'phantomAddresses', 'manual']) {
+    const v = form.elements[name].value.trim();
+    if (v) patch[name] = v; // only send what was entered; blanks leave settings unchanged
+  }
+  if (!Object.keys(patch).length) { msg.textContent = 'Nothing to save.'; return; }
+  msg.textContent = 'Saving…';
+  try {
+    const res = await fetch('api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Save failed');
+    msg.textContent = 'Saved. Syncing…';
+    $('main').classList.add('refetching');
+    await fetch('api/sync', { method: 'POST' });
+    await load();
+    msg.textContent = 'Saved & synced.';
+    form.reset();
+  } catch (err) {
+    msg.textContent = '⚠ ' + err.message;
+  } finally {
+    $('main').classList.remove('refetching');
+  }
+});
+
 $('logout-btn').addEventListener('click', async () => {
-  await fetch('/api/auth/logout', { method: 'POST' });
-  location.href = '/login';
+  await fetch('api/auth/logout', { method: 'POST' });
+  location.href = 'login';
 });
 
 $('theme-btn').addEventListener('click', () => {

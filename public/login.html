@@ -68,8 +68,10 @@
     let setupMode = false;
 
     async function init() {
-      const res = await fetch('/api/auth/status');
+      const res = await fetch('api/auth/status');
+      if (res.status === 404) throw new Error('status unavailable');
       const status = await res.json();
+      if (status.authed) { location.href = './'; return; }
       $('username').value = status.username;
       setupMode = !status.configured;
       if (setupMode) {
@@ -92,14 +94,14 @@
       }
       $('submit').disabled = true;
       try {
-        const res = await fetch(setupMode ? '/api/auth/setup' : '/api/auth/login', {
+        const res = await fetch(setupMode ? 'api/auth/setup' : 'api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: $('username').value.trim(), password }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(body.error || 'Sign-in failed');
-        location.href = '/';
+        location.href = './';
       } catch (err) {
         $('error').textContent = err.message;
         $('submit').disabled = false;
