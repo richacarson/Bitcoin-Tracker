@@ -110,6 +110,7 @@
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(body.error || 'Sign-in failed');
         if (body.token) localStorage.setItem('btc_token', body.token);
+        sessionStorage.setItem('btc_pw_login', '1'); // password sign-in bypasses the Face ID lock once
         location.href = './';
       } catch (err) {
         $('error').textContent = err.message;

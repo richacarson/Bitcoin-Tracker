@@ -13,9 +13,14 @@ import { loadImports } from './lib/imports.js';
 import { computePortfolio } from './lib/costbasis.js';
 import { buildSampleData } from './lib/sample.js';
 import * as auth from './lib/auth.js';
+import * as webauthn from './lib/webauthn.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE = path.join(__dirname, 'data', 'cache.json');
+const WEBAUTHN_FILE = path.join(__dirname, 'data', 'webauthn.json');
+const loadWebauthn = () => readJsonFile(WEBAUTHN_FILE, { credentials: [], challenge: null });
+const saveWebauthn = (rec) => writeJsonFile(WEBAUTHN_FILE, rec);
+const requestOrigin = (req) => req.headers.origin || `${req.protocol}://${req.get('host')}`;
 const app = express();
 app.set('trust proxy', 1); // honor X-Forwarded-Proto behind a hosting proxy
 app.use(express.json());
@@ -67,6 +72,34 @@ app.post('/api/auth/login', (req, res) => {
 app.post('/api/auth/logout', (req, res) => {
   res.setHeader('Set-Cookie', auth.sessionCookie(req, '', 0));
   res.json({ ok: true });
+});
+
+// ── Passkey (Face ID) unlock — public half: mint a session from a passkey ─
+app.post('/api/webauthn/login-options', async (req, res) => {
+  try {
+    const rec = loadWebauthn();
+    const options = await webauthn.authOptions(rec, requestOrigin(req));
+    saveWebauthn(rec);
+    res.json(options);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/webauthn/login', async (req, res) => {
+  if (!auth.loginAllowed(req.ip)) return res.status(429).json({ error: 'Too many attempts — try again in 15 minutes' });
+  try {
+    const rec = loadWebauthn();
+    await webauthn.verifyAuth(rec, requestOrigin(req), req.body);
+    saveWebauthn(rec);
+    auth.recordLogin(req.ip, true);
+    const token = auth.issueToken();
+    res.setHeader('Set-Cookie', auth.sessionCookie(req, token, 30 * 86400));
+    res.json({ ok: true, token });
+  } catch (err) {
+    auth.recordLogin(req.ip, false);
+    res.status(401).json({ error: err.message });
+  }
 });
 
 app.use((req, res, next) => {
@@ -215,6 +248,38 @@ app.get('/api/dashboard', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Passkey (Face ID) unlock — authenticated half: manage the passkey ────
+app.get('/api/webauthn/status', (req, res) => {
+  res.json({ enabled: webauthn.hasPasskey(loadWebauthn()) });
+});
+
+app.post('/api/webauthn/register-options', async (req, res) => {
+  try {
+    const rec = loadWebauthn();
+    const options = await webauthn.registerOptions(rec, requestOrigin(req), auth.username());
+    saveWebauthn(rec);
+    res.json(options);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/webauthn/register', async (req, res) => {
+  try {
+    const rec = loadWebauthn();
+    await webauthn.verifyRegister(rec, requestOrigin(req), req.body);
+    saveWebauthn(rec);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/webauthn/disable', (req, res) => {
+  saveWebauthn({ credentials: [], challenge: null });
+  res.json({ ok: true });
 });
 
 app.get('/api/settings', (req, res) => {

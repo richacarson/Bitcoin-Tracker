@@ -11,6 +11,17 @@ for (const file of ['costbasis.js', 'sample.js', 'manual.js', 'dates.js']) {
   fs.copyFileSync(path.join(root, 'lib', file), path.join(out, file));
 }
 
+// webauthn.js needs its bare npm import rewritten to Deno's npm: form,
+// pinned to the version installed locally so both runtimes match.
+const swaVersion = JSON.parse(
+  fs.readFileSync(path.join(root, 'node_modules', '@simplewebauthn', 'server', 'package.json'), 'utf8')
+).version;
+fs.writeFileSync(
+  path.join(out, 'webauthn.js'),
+  fs.readFileSync(path.join(root, 'lib', 'webauthn.js'), 'utf8')
+    .replace("'@simplewebauthn/server'", `'npm:@simplewebauthn/server@${swaVersion}'`)
+);
+
 const assets = {};
 for (const file of ['index.html', 'app.js', 'style.css', 'login.html', 'config.js']) {
   assets[file] = fs.readFileSync(path.join(root, 'public', file), 'utf8');
