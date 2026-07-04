@@ -741,6 +741,30 @@ Deno.serve(async (req: Request) => {
     if (p === '/login' || p === '/login.html') return asset('login.html');
     if (p === '/config.js') return asset('config.js');
 
+    // Scheduled sync (pg_cron -> pg_net). Auth: shared secret from the
+    // state table, so the dashboard stays fresh without any page loads.
+    if (p === '/api/cron-sync' && req.method === 'POST') {
+      const cron = (await kvGet('cron')) || {};
+      const given = req.headers.get('x-cron-secret') || '';
+      if (!cron.secret || !timingEqual(te.encode(given.padEnd(64).slice(0, 64)), te.encode(String(cron.secret).padEnd(64).slice(0, 64)))) {
+        return json({ error: 'unauthorized' }, 401);
+      }
+      const cache = await kvGet('cache');
+      const age = Date.now() - new Date(cache?.syncedAt || 0).getTime();
+      const incomplete = !cache || (cache.krakenCursor && !cache.krakenCursor.complete);
+      if (!incomplete && age < 55 * 60 * 1000) return json({ skipped: 'fresh' });
+      const lock = (await kvGet('syncLock')) || {};
+      if (lock.until && Date.now() < lock.until) return json({ skipped: 'locked' });
+      await kvSet('syncLock', { until: Date.now() + 4 * 60 * 1000 });
+      const run = sync().catch(() => {}).finally(() => kvSet('syncLock', { until: 0 }).catch(() => {}));
+      if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+        (globalThis as any).EdgeRuntime.waitUntil(run);
+        return json({ started: true }, 202);
+      }
+      await run;
+      return json({ started: true, completed: true });
+    }
+
     // Everything below requires a session.
     if (!(await verifyToken(tokenFromRequest(req)))) {
       if (p.startsWith('/api/')) return json({ error: 'Not signed in' }, 401);
