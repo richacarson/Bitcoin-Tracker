@@ -72,6 +72,11 @@ h1 { font-size: 20px; font-weight: 650; margin: 0; }
 .btn:hover { background: var(--ghost); }
 .btn[disabled] { opacity: 0.5; cursor: default; }
 .btn-icon { padding: 7px 10px; }
+.btn.active { background: var(--ghost); border-color: var(--text-muted); }
+
+/* ── Settings view ── */
+.settings-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 4px 0 14px; }
+.settings-head h2 { font-size: 17px; font-weight: 650; margin: 0; }
 
 .banner {
   background: var(--surface-1); border: 1px solid var(--border);
@@ -104,8 +109,7 @@ h1 { font-size: 20px; font-weight: 650; margin: 0; }
 .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 12px; }
 .card-head h2 { margin: 0; }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } .tile.hero { grid-column: span 1; } }
+@media (max-width: 760px) { .tile.hero { grid-column: span 1; } }
 
 /* ── Location rows ── */
 .loc-row { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: center; padding: 5px 0; }
@@ -230,7 +234,6 @@ tr:last-child td { border-bottom: 0; }
 
   .card { padding: 14px 12px; }
   .card h2 { font-size: 15px; }
-  .two-col { gap: 12px; }
 
   /* Venue rows: name on its own line, bar + value below */
   .loc-row { grid-template-columns: 1fr auto; row-gap: 4px; padding: 8px 0; }
