@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readJsonFile, writeJsonFile } from './lib/util.js';
-import { fetchKrakenTrades, fetchKrakenTransfers, fetchKrakenBalance, krakenConfigured } from './lib/kraken.js';
+import { fetchKrakenTrades, fetchKrakenLedger, fetchKrakenBalance, krakenConfigured } from './lib/kraken.js';
 import { fetchCoinbaseHistory, coinbaseConfigured } from './lib/coinbase.js';
 import { fetchOnchainBalance } from './lib/onchain.js';
 import { getConfig, saveSettings, publicSettings } from './lib/config.js';
@@ -114,8 +114,12 @@ async function sync() {
         .filter((t) => t.source === 'kraken')
         .reduce((max, t) => Math.max(max, new Date(t.date).getTime()), 0);
       const sinceSec = lastKraken ? Math.floor(lastKraken / 1000) - 86400 : 0;
-      cache.trades = mergeById(cache.trades, await fetchKrakenTrades(cfg.kraken, sinceSec));
-      cache.transfers = mergeById(cache.transfers || [], await fetchKrakenTransfers(cfg.kraken, sinceSec));
+      const ledger = await fetchKrakenLedger(cfg.kraken, sinceSec);
+      cache.trades = mergeById(cache.trades, [
+        ...(await fetchKrakenTrades(cfg.kraken, sinceSec)),
+        ...ledger.trades,
+      ]);
+      cache.transfers = mergeById(cache.transfers || [], ledger.transfers);
       cache.balances.kraken = await fetchKrakenBalance(cfg.kraken);
     } catch (err) {
       errors.push(`Kraken: ${err.message}`);
