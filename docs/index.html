@@ -14,6 +14,16 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div id="lock" class="lock" hidden>
+    <div class="lock-box">
+      <div class="lock-icon">₿</div>
+      <h2>Bitcoin Tracker is locked</h2>
+      <p class="muted">Confirm it's you to see your portfolio.</p>
+      <button id="unlock-btn" class="btn btn-primary" type="button">Unlock with Face ID</button>
+      <p id="lock-msg" class="lock-msg muted"></p>
+      <a class="lock-alt" href="login.html">Use password instead</a>
+    </div>
+  </div>
   <div class="viz-root">
     <header class="topbar">
       <div class="title-block">
@@ -89,6 +99,21 @@
           <h2>Settings</h2>
           <button id="settings-back" class="btn" type="button">← Back to dashboard</button>
         </div>
+
+        <section class="card" id="security-card">
+          <h2>Security</h2>
+          <div class="kv-row">
+            <span class="k">Face ID / Touch ID lock</span>
+            <span class="v" id="faceid-state">checking…</span>
+          </div>
+          <p class="muted">When on, the app asks for Face ID (or Touch ID / device passcode) every time it
+            opens, and your sign-in is never stored on the device — it's re-issued only after each unlock.
+            Your password keeps working as a fallback.</p>
+          <div class="form-actions">
+            <button id="faceid-btn" class="btn btn-primary" type="button" hidden>Turn on</button>
+            <span id="faceid-msg" class="muted"></span>
+          </div>
+        </section>
 
         <section class="card" id="locations-card">
           <h2>Where it lives</h2>

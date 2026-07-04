@@ -78,6 +78,19 @@ h1 { font-size: 20px; font-weight: 650; margin: 0; }
 .settings-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 4px 0 14px; }
 .settings-head h2 { font-size: 17px; font-weight: 650; margin: 0; }
 
+/* ── Face ID lock overlay ── */
+.lock {
+  position: fixed; inset: 0; z-index: 100; background: var(--page);
+  display: grid; place-items: center; padding: 24px;
+}
+.lock[hidden] { display: none; } /* display:grid would defeat the hidden attribute */
+.lock-box { text-align: center; max-width: 320px; }
+.lock-icon { font-size: 44px; margin-bottom: 8px; }
+.lock-box h2 { font-size: 18px; margin: 0 0 6px; }
+.lock-box .btn { margin-top: 16px; padding: 11px 22px; font-size: 14px; }
+.lock-msg { min-height: 20px; margin: 12px 0 0; }
+.lock-alt { display: inline-block; margin-top: 10px; color: var(--text-muted); font-size: 13px; }
+
 .banner {
   background: var(--surface-1); border: 1px solid var(--border);
   border-left: 3px solid var(--series-3);

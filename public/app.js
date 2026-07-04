@@ -5,8 +5,12 @@ const state = { data: null, range: 'all', views: { value: 'chart', buys: 'chart'
 const NS = 'http://www.w3.org/2000/svg';
 const $ = (id) => document.getElementById(id);
 const API = (p) => (window.BTC_API_BASE || '') + p;
+// With the Face ID lock on, the session token lives only in memory — a fresh
+// one is minted from the passkey on every open, nothing usable sits at rest.
+const FACEID_KEY = 'btc_faceid';
+let memToken = null;
 function authHeaders(extra = {}) {
-  const token = localStorage.getItem('btc_token');
+  const token = memToken || localStorage.getItem('btc_token');
   return token ? { ...extra, Authorization: 'Bearer ' + token } : extra;
 }
 
@@ -545,6 +549,135 @@ function renderTxTable() {
     ]));
 }
 
+// ── Face ID lock (WebAuthn passkey) ─────────────────────────────────────
+const b64uToBuf = (s) =>
+  Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const bufToB64u = (b) =>
+  btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function webauthnCreate(options) {
+  options.challenge = b64uToBuf(options.challenge);
+  options.user.id = b64uToBuf(options.user.id);
+  for (const c of options.excludeCredentials || []) c.id = b64uToBuf(c.id);
+  const cred = await navigator.credentials.create({ publicKey: options });
+  return {
+    id: cred.id,
+    rawId: bufToB64u(cred.rawId),
+    type: cred.type,
+    clientExtensionResults: cred.getClientExtensionResults(),
+    response: {
+      attestationObject: bufToB64u(cred.response.attestationObject),
+      clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+      transports: cred.response.getTransports ? cred.response.getTransports() : [],
+    },
+  };
+}
+
+async function webauthnGet(options) {
+  options.challenge = b64uToBuf(options.challenge);
+  for (const c of options.allowCredentials || []) c.id = b64uToBuf(c.id);
+  const cred = await navigator.credentials.get({ publicKey: options });
+  return {
+    id: cred.id,
+    rawId: bufToB64u(cred.rawId),
+    type: cred.type,
+    clientExtensionResults: cred.getClientExtensionResults(),
+    response: {
+      authenticatorData: bufToB64u(cred.response.authenticatorData),
+      clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+      signature: bufToB64u(cred.response.signature),
+      userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null,
+    },
+  };
+}
+
+async function apiPost(path, body, headers) {
+  const res = await fetch(API(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+async function faceIdUnlock() {
+  const options = await apiPost('api/webauthn/login-options');
+  const assertion = await webauthnGet(options);
+  const result = await apiPost('api/webauthn/login', assertion);
+  memToken = result.token;
+  localStorage.removeItem('btc_token'); // nothing usable at rest while locked
+}
+
+async function tryUnlock() {
+  const msg = $('lock-msg');
+  msg.textContent = '';
+  $('unlock-btn').disabled = true;
+  try {
+    await faceIdUnlock();
+    $('lock').hidden = true;
+    load();
+  } catch (err) {
+    if (/No passkey registered/i.test(err.message)) {
+      // Lock was turned off elsewhere — fall back to normal sign-in.
+      localStorage.removeItem(FACEID_KEY);
+      $('lock').hidden = true;
+      load();
+      return;
+    }
+    msg.textContent = err.name === 'NotAllowedError' ? 'Face ID was cancelled — try again.' : err.message;
+  } finally {
+    $('unlock-btn').disabled = false;
+  }
+}
+
+async function renderSecurity() {
+  const stateEl = $('faceid-state');
+  const btn = $('faceid-btn');
+  const msg = $('faceid-msg');
+  if (!window.PublicKeyCredential) {
+    stateEl.textContent = 'not supported in this browser';
+    return;
+  }
+  let enabled = false;
+  try {
+    enabled = (await (await fetch(API('api/webauthn/status'), { headers: authHeaders() })).json()).enabled;
+  } catch {
+    stateEl.textContent = 'unavailable';
+    return;
+  }
+  const localOn = localStorage.getItem(FACEID_KEY) === '1';
+  stateEl.textContent = enabled ? (localOn ? 'On' : 'On (other device)') : 'Off';
+  btn.hidden = false;
+  btn.textContent = enabled ? 'Turn off' : 'Turn on';
+  btn.onclick = async () => {
+    btn.disabled = true;
+    msg.textContent = '';
+    try {
+      if (enabled) {
+        await apiPost('api/webauthn/disable', {}, authHeaders());
+        localStorage.removeItem(FACEID_KEY);
+        if (memToken) { localStorage.setItem('btc_token', memToken); memToken = null; }
+        msg.textContent = 'Face ID lock is off.';
+      } else {
+        const options = await apiPost('api/webauthn/register-options', {}, authHeaders());
+        const attestation = await webauthnCreate(options);
+        await apiPost('api/webauthn/register', attestation, authHeaders());
+        localStorage.setItem(FACEID_KEY, '1');
+        const tok = localStorage.getItem('btc_token');
+        if (tok) { memToken = tok; localStorage.removeItem('btc_token'); }
+        msg.textContent = 'On — the app will ask for Face ID next time it opens.';
+      }
+      renderSecurity();
+    } catch (err) {
+      msg.textContent = '⚠ ' + (err.name === 'NotAllowedError' ? 'Face ID was cancelled.' : err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
 function renderConnections() {
   const box = $('conn-status');
   box.replaceChildren();
@@ -613,6 +746,7 @@ function renderAll() {
   if (!state.data) return;
   renderChrome();
   renderConnections();
+  renderSecurity();
   renderTiles();
   renderLocations();
   renderActivity();
@@ -820,4 +954,17 @@ async function livePriceTick() {
 setInterval(livePriceTick, 15000);
 document.addEventListener('visibilitychange', livePriceTick);
 
-load();
+// ── Boot: Face ID gate first if the lock is on ──────────────────────────
+$('unlock-btn').addEventListener('click', tryUnlock);
+(function boot() {
+  const locked = localStorage.getItem(FACEID_KEY) === '1' && window.PublicKeyCredential;
+  // A fresh password sign-in bypasses the lock once (fallback if Face ID fails).
+  const pwLogin = sessionStorage.getItem('btc_pw_login') === '1';
+  sessionStorage.removeItem('btc_pw_login');
+  if (locked && !pwLogin) {
+    $('lock').hidden = false;
+    tryUnlock();
+  } else {
+    load();
+  }
+})();

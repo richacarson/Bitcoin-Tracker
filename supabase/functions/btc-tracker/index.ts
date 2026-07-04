@@ -12,6 +12,7 @@ import { computePortfolio } from './costbasis.js';
 import { buildSampleData } from './sample.js';
 import { normalizeManual } from './manual.js';
 import { dayKey } from './dates.js';
+import * as webauthn from './webauthn.js';
 import { ASSETS } from './assets.ts';
 
 const FN_NAME = 'btc-tracker';
@@ -738,6 +739,32 @@ Deno.serve(async (req: Request) => {
     if (p === '/api/auth/logout' && req.method === 'POST') {
       return json({ ok: true }, 200, { 'set-cookie': cookieHeader('', 0) });
     }
+
+    // Passkey (Face ID) unlock — public half: mint a session from a passkey.
+    if (p === '/api/webauthn/login-options' && req.method === 'POST') {
+      try {
+        const rec = (await kvGet('webauthn')) || { credentials: [], challenge: null };
+        const options = await webauthn.authOptions(rec, req.headers.get('origin') || '');
+        await kvSet('webauthn', rec);
+        return json(options);
+      } catch (err: any) {
+        return json({ error: err.message }, 400);
+      }
+    }
+    if (p === '/api/webauthn/login' && req.method === 'POST') {
+      if (!loginAllowed(ip)) return json({ error: 'Too many attempts — try again in 15 minutes' }, 429);
+      try {
+        const rec = (await kvGet('webauthn')) || { credentials: [], challenge: null };
+        await webauthn.verifyAuth(rec, req.headers.get('origin') || '', await req.json().catch(() => ({})));
+        await kvSet('webauthn', rec);
+        recordLogin(ip, true);
+        const token = await issueToken();
+        return json({ ok: true, token }, 200, { 'set-cookie': cookieHeader(token, SESSION_DAYS * 86400) });
+      } catch (err: any) {
+        recordLogin(ip, false);
+        return json({ error: err.message }, 401);
+      }
+    }
     if (p === '/login' || p === '/login.html') return asset('login.html');
     if (p === '/config.js') return asset('config.js');
 
@@ -773,6 +800,36 @@ Deno.serve(async (req: Request) => {
 
     if (p === '/' || p === '/index.html') return asset('index.html');
     if (p === '/app.js' || p === '/style.css') return asset(p.slice(1));
+
+    // Passkey (Face ID) unlock — authenticated half: manage the passkey.
+    if (p === '/api/webauthn/status') {
+      const rec = (await kvGet('webauthn')) || {};
+      return json({ enabled: webauthn.hasPasskey(rec) });
+    }
+    if (p === '/api/webauthn/register-options' && req.method === 'POST') {
+      try {
+        const rec = (await kvGet('webauthn')) || { credentials: [], challenge: null };
+        const options = await webauthn.registerOptions(rec, req.headers.get('origin') || '', USERNAME);
+        await kvSet('webauthn', rec);
+        return json(options);
+      } catch (err: any) {
+        return json({ error: err.message }, 400);
+      }
+    }
+    if (p === '/api/webauthn/register' && req.method === 'POST') {
+      try {
+        const rec = (await kvGet('webauthn')) || { credentials: [], challenge: null };
+        await webauthn.verifyRegister(rec, req.headers.get('origin') || '', await req.json().catch(() => ({})));
+        await kvSet('webauthn', rec);
+        return json({ ok: true });
+      } catch (err: any) {
+        return json({ error: err.message }, 400);
+      }
+    }
+    if (p === '/api/webauthn/disable' && req.method === 'POST') {
+      await kvSet('webauthn', { credentials: [], challenge: null });
+      return json({ ok: true });
+    }
 
     if (p === '/api/dashboard') return json(await dashboard());
     if (p === '/api/settings' && req.method === 'GET') return json(await publicSettings());
