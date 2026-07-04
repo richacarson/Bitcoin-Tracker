@@ -1,0 +1,17 @@
+{
+  "name": "bitcoin-tracker",
+  "version": "1.0.0",
+  "description": "Self-hosted BTC dashboard: pulls Kraken + Coinbase history, tracks BTC moved to Phantom, computes cost basis, average cost, and P/L.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

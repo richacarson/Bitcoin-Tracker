@@ -1,0 +1,25 @@
+# One-click deploy on Render: https://render.com/docs/blueprints
+# The starter plan includes a persistent disk so your login password and
+# synced history survive deploys. On the free plan (no disk), set
+# APP_PASSWORD and SESSION_SECRET instead and expect a re-sync after deploys.
+services:
+  - type: web
+    name: bitcoin-tracker
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTH_USERNAME
+        value: richacarson
+      # Add these in the Render dashboard (Environment → Secret):
+      # KRAKEN_API_KEY, KRAKEN_API_SECRET,
+      # COINBASE_API_KEY_NAME, COINBASE_API_PRIVATE_KEY,
+      # PHANTOM_BTC_ADDRESSES

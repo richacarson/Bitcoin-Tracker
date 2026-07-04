@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bitcoin Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="viz-root">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>Bitcoin Tracker</h1>
+        <p id="subtitle" class="subtitle">Loading…</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="sync-btn" class="btn" type="button">Sync now</button>
+        <button id="theme-btn" class="btn btn-icon" type="button" aria-label="Toggle theme">◐</button>
+        <button id="logout-btn" class="btn" type="button">Log out</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <main id="main">
+      <section id="tiles" class="tiles" aria-label="Portfolio summary"></section>
+
+      <section class="two-col">
+        <div class="card" id="locations-card">
+          <h2>Where it lives</h2>
+          <div id="locations"></div>
+        </div>
+        <div class="card" id="activity-card">
+          <h2>Buying activity</h2>
+          <div id="activity"></div>
+        </div>
+      </section>
+
+      <section class="card" id="connections-card">
+        <div class="card-head">
+          <h2>Connections</h2>
+        </div>
+        <div id="conn-status"></div>
+        <details id="conn-details">
+          <summary>Add or update connections</summary>
+          <form id="conn-form" autocomplete="off">
+            <p class="muted">Keys are stored server-side only and should be <strong>read-only</strong>
+              (Kraken: query funds/trades/ledger · Coinbase: view). See the README for the
+              step-by-step key walkthrough.</p>
+            <div class="form-grid">
+              <label>Kraken API key
+                <input name="krakenKey" type="password" placeholder="paste to set or replace" />
+              </label>
+              <label>Kraken private key
+                <input name="krakenSecret" type="password" placeholder="paste to set or replace" />
+              </label>
+              <label>Coinbase API key name
+                <input name="coinbaseKeyName" type="password" placeholder="organizations/…/apiKeys/…" />
+              </label>
+              <label>Coinbase private key
+                <input name="coinbasePrivateKey" type="password" placeholder="-----BEGIN EC PRIVATE KEY----- … or base64" />
+              </label>
+              <label class="wide">Phantom BTC address(es), comma-separated
+                <input name="phantomAddresses" type="text" placeholder="bc1q…, bc1p…" />
+              </label>
+              <label class="wide">Manual transactions (JSON array; usd = total paid incl. fees)
+                <textarea name="manual" rows="3" placeholder='[{"date":"2021-03-15","type":"buy","btc":0.05,"usd":2800}]'></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save & sync</button>
+              <span id="conn-msg" class="muted"></span>
+            </div>
+          </form>
+        </details>
+      </section>
+
+      <div class="filter-row" role="toolbar" aria-label="Date range">
+        <span class="filter-label">Range</span>
+        <div class="segmented" id="range-buttons">
+          <button data-range="90d" type="button">90D</button>
+          <button data-range="1y" type="button">1Y</button>
+          <button data-range="2y" type="button">2Y</button>
+          <button data-range="all" type="button" class="active">All</button>
+        </div>
+      </div>
+
+      <section class="card chart-card" id="value-card">
+        <div class="card-head">
+          <h2>Invested vs. portfolio value</h2>
+          <div class="segmented small view-toggle" data-for="value">
+            <button data-view="chart" class="active" type="button">Chart</button>
+            <button data-view="table" type="button">Table</button>
+          </div>
+        </div>
+        <div id="value-chart" class="chart"></div>
+        <div id="value-table" class="table-wrap" hidden></div>
+      </section>
+
+      <section class="card chart-card" id="buys-card">
+        <div class="card-head">
+          <h2>Your buys vs. the market</h2>
+          <div class="segmented small view-toggle" data-for="buys">
+            <button data-view="chart" class="active" type="button">Chart</button>
+            <button data-view="table" type="button">Table</button>
+          </div>
+        </div>
+        <div id="buys-chart" class="chart"></div>
+        <div id="buys-table" class="table-wrap" hidden></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Transactions</h2>
+          <span id="tx-count" class="muted"></span>
+        </div>
+        <div id="tx-table" class="table-wrap"></div>
+      </section>
+
+      <footer id="footer" class="footer"></footer>
+    </main>
+  </div>
+  <div id="tooltip" class="tooltip" hidden></div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

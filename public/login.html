@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · Bitcoin Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>₿</text></svg>" />
+  <style>
+    :root {
+      --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e;
+      --muted: #898781; --border: rgba(11,11,11,0.1); --accent: #2a78d6;
+      --bad: #d03b3b; --ghost: rgba(11,11,11,0.05);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --page: #0d0d0d; --ink: #ffffff; --ink-2: #c3c2b7;
+        --muted: #898781; --border: rgba(255,255,255,0.1); --accent: #3987e5;
+        --bad: #e66767; --ghost: rgba(255,255,255,0.06);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--page); color: var(--ink);
+      font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      display: grid; place-items: center; min-height: 100vh; padding: 20px;
+    }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 32px 28px; width: 100%; max-width: 380px;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+    label { display: block; font-size: 12.5px; color: var(--ink-2); margin: 14px 0 4px; }
+    input {
+      width: 100%; padding: 9px 12px; font: inherit; color: var(--ink);
+      background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+    input[readonly] { color: var(--muted); }
+    button {
+      width: 100%; margin-top: 20px; padding: 10px; font: inherit; font-weight: 600;
+      color: #fff; background: var(--accent); border: 0; border-radius: 8px; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.05); }
+    button[disabled] { opacity: 0.6; cursor: default; }
+    .error { color: var(--bad); font-size: 13px; margin: 12px 0 0; min-height: 18px; }
+    .badge { font-size: 22px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <form class="card" id="form">
+    <div class="badge">₿</div>
+    <h1 id="title">Sign in</h1>
+    <p class="sub" id="subtitle">Bitcoin Tracker</p>
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" required />
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required />
+    <div id="confirm-wrap" hidden>
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" type="password" autocomplete="new-password" />
+    </div>
+    <p class="error" id="error"></p>
+    <button id="submit" type="submit">Sign in</button>
+  </form>
+  <script src="config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const API = (p) => (window.BTC_API_BASE || '') + p;
+    let setupMode = false;
+
+    async function init() {
+      const res = await fetch(API('api/auth/status'));
+      if (res.status === 404) throw new Error('status unavailable');
+      const status = await res.json();
+      if (status.authed) { location.href = './'; return; }
+      $('username').value = status.username;
+      setupMode = !status.configured;
+      if (setupMode) {
+        $('title').textContent = 'Create your password';
+        $('subtitle').textContent = 'First-time setup — this password will protect your dashboard.';
+        $('confirm-wrap').hidden = false;
+        $('confirm').required = true;
+        $('password').autocomplete = 'new-password';
+        $('submit').textContent = 'Create password & sign in';
+      }
+    }
+
+    $('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('error').textContent = '';
+      const password = $('password').value;
+      if (setupMode) {
+        if (password.length < 8) { $('error').textContent = 'Use at least 8 characters.'; return; }
+        if (password !== $('confirm').value) { $('error').textContent = 'Passwords don’t match.'; return; }
+      }
+      $('submit').disabled = true;
+      try {
+        const res = await fetch(API(setupMode ? 'api/auth/setup' : 'api/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: $('username').value.trim(), password }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'Sign-in failed');
+        if (body.token) localStorage.setItem('btc_token', body.token);
+        location.href = './';
+      } catch (err) {
+        $('error').textContent = err.message;
+        $('submit').disabled = false;
+      }
+    });
+
+    init().catch(() => { $('error').textContent = 'Could not reach the server.'; });
+  </script>
+</body>
+</html>
