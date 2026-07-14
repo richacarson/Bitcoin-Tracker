@@ -465,6 +465,90 @@ function renderActivity() {
   }
 }
 
+// ── Milestones: time until holdings reach 0.5 / 0.75 / 1 BTC ───────────
+// Fixed-USD DCA into an exponentially growing price: with k = ln(1+g)/365,
+// holdings(t) = H0 + (dailyUsd / (P0·k)) · (1 − e^(−kt)), so the time to a
+// target solves in closed form — and may be "never" if the asymptote sits
+// below the target (each dollar buys less BTC as price climbs).
+const MI_KEY = 'btc_milestones';
+const MI_TARGETS = [0.5, 0.75, 1];
+
+function daysToTarget(needBtc, dailyUsd, price, cagr) {
+  if (needBtc <= 0) return 0;
+  if (!dailyUsd || dailyUsd <= 0 || !price) return Infinity;
+  if (!cagr) return (needBtc * price) / dailyUsd;
+  const k = Math.log(1 + cagr) / 365;
+  const arg = 1 - (needBtc * price * k) / dailyUsd;
+  if (arg <= 0) return Infinity;
+  return -Math.log(arg) / k;
+}
+
+function fmtEta(days, withDate) {
+  if (days === 0) return { cls: 'type-buy', text: 'Reached ✓' };
+  if (!isFinite(days)) return 'not at this pace';
+  const date = new Date(Date.now() + days * 86400000);
+  const dateStr = date.toLocaleDateString('en-US', days < 90
+    ? { month: 'short', day: 'numeric', year: 'numeric' }
+    : { month: 'short', year: 'numeric' });
+  let span;
+  if (days < 1.5) span = 'today';
+  else if (days < 90) span = `${Math.round(days)} days`;
+  else if (days < 700) span = `${parseFloat((days / 30.44).toFixed(1))} months`;
+  else span = `${parseFloat((days / 365.25).toFixed(1))} years`;
+  return withDate ? `≈ ${span} · ${dateStr}` : `≈ ${span}`;
+}
+
+// Current buying pace from actual history: most recent window with enough buys.
+function estimateDailyUsd() {
+  const buys = state.data?.buys || [];
+  for (const windowDays of [30, 90, 365]) {
+    const cutoff = Date.now() - windowDays * 86400000;
+    const recent = buys.filter((b) => new Date(b.date).getTime() >= cutoff);
+    if (recent.length >= 5) return recent.reduce((sum, b) => sum + b.usd, 0) / windowDays;
+  }
+  return 0;
+}
+
+function renderMilestones() {
+  if (!state.data) return;
+  const s = state.data.summary;
+  const saved = JSON.parse(localStorage.getItem(MI_KEY) || '{}');
+  const autoDca = Math.round(estimateDailyUsd());
+  const dcaEl = $('mi-dca'), cagrEl = $('mi-cagr');
+  if (document.activeElement !== dcaEl) dcaEl.value = saved.dca ?? autoDca;
+  if (document.activeElement !== cagrEl) cagrEl.value = saved.cagr ?? 30;
+  const dailyUsd = parseFloat(dcaEl.value) || 0;
+  const cagr = (parseFloat(cagrEl.value) || 0) / 100;
+
+  buildTable(
+    $('milestones'),
+    ['Milestone', `At ${cagrEl.value || 0}%/yr growth`, 'If price stays flat'],
+    MI_TARGETS.map((target) => {
+      const need = target - s.currentBtc;
+      return [
+        `${target} BTC`,
+        fmtEta(daysToTarget(need, dailyUsd, s.currentPrice, cagr), true),
+        fmtEta(daysToTarget(need, dailyUsd, s.currentPrice, 0), false),
+      ];
+    })
+  );
+  $('mi-note').textContent =
+    `From your ${fmtBtc(s.currentBtc)} today, buying $${dailyUsd.toLocaleString('en-US')}/day` +
+    (saved.dca == null ? ` (your actual last-30-day pace)` : '') +
+    `. Rising prices slow accumulation, so the growth column is the conservative bound and flat price the optimistic one. Projections, not promises.`;
+}
+
+for (const id of ['mi-dca', 'mi-cagr']) {
+  $(id).addEventListener('input', () => {
+    const dca = $('mi-dca').value, cagr = $('mi-cagr').value;
+    localStorage.setItem(MI_KEY, JSON.stringify({
+      ...(dca !== '' && { dca: parseFloat(dca) || 0 }),
+      ...(cagr !== '' && { cagr: parseFloat(cagr) || 0 }),
+    }));
+    renderMilestones();
+  });
+}
+
 function renderValueChart() {
   const cutoff = rangeCutoff();
   const daily = state.data.daily.filter((d) => new Date(d.d).getTime() >= cutoff);
@@ -750,6 +834,7 @@ function renderAll() {
   renderTiles();
   renderLocations();
   renderActivity();
+  renderMilestones();
   renderValueChart();
   renderBuysChart();
   renderTxTable();
