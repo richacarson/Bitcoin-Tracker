@@ -8,7 +8,7 @@ import { fetchCoinbaseHistory, coinbaseConfigured } from './lib/coinbase.js';
 import { fetchOnchainBalance } from './lib/onchain.js';
 import { getConfig, saveSettings, publicSettings } from './lib/config.js';
 import { normalizeManual } from './lib/manual.js';
-import { fetchCurrentPrice, getDailyPrices } from './lib/prices.js';
+import { fetchCurrentPrice, getDailyPrices, trailingCagrPct } from './lib/prices.js';
 import { loadImports } from './lib/imports.js';
 import { computePortfolio } from './lib/costbasis.js';
 import { buildSampleData } from './lib/sample.js';
@@ -217,7 +217,11 @@ app.get('/api/dashboard', async (req, res) => {
     const firstTs = trades.length
       ? Math.min(...trades.map((t) => new Date(t.date).getTime()))
       : Date.now() - 1200 * 86400000;
-    const dailyPrices = await getDailyPrices(firstTs - 86400000);
+    // Keep 4 years of closes around regardless of trade history — the
+    // milestones card defaults its growth rate to the trailing 4-yr CAGR.
+    const dailyPrices = await getDailyPrices(
+      Math.min(firstTs - 86400000, Date.now() - 4 * 365.25 * 86400000)
+    );
 
     if (demo) {
       const sample = buildSampleData(dailyPrices, price);
@@ -227,6 +231,7 @@ app.get('/api/dashboard', async (req, res) => {
     }
 
     const portfolio = computePortfolio({ trades, transfers, dailyPrices, currentPrice: price, balances });
+    portfolio.summary.trailingCagrPct = trailingCagrPct(dailyPrices, price, 4);
 
     res.json({
       ...portfolio,
