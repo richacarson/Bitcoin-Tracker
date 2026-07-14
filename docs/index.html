@@ -49,6 +49,20 @@
           <div id="activity"></div>
         </section>
 
+        <section class="card" id="milestones-card">
+          <h2>Milestones</h2>
+          <div id="milestones" class="table-wrap"></div>
+          <div class="mi-controls">
+            <label>Buying, $/day
+              <input id="mi-dca" type="number" min="0" step="1" inputmode="decimal" />
+            </label>
+            <label>Price growth, %/yr
+              <input id="mi-cagr" type="number" step="5" inputmode="decimal" />
+            </label>
+          </div>
+          <p class="muted" id="mi-note"></p>
+        </section>
+
         <div class="filter-row" role="toolbar" aria-label="Date range">
           <span class="filter-label">Range</span>
           <div class="segmented" id="range-buttons">

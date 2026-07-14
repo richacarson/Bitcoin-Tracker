@@ -135,6 +135,16 @@ h1 { font-size: 20px; font-weight: 650; margin: 0; }
 .kv-row .k { color: var(--text-secondary); }
 .kv-row .v { font-variant-numeric: tabular-nums; }
 
+/* ── Milestones ── */
+.mi-controls { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.mi-controls label { font-size: 12.5px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
+.mi-controls input {
+  width: 130px; padding: 7px 10px; font: inherit; color: var(--text-primary);
+  background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+}
+.mi-controls input:focus { outline: 2px solid var(--series-1); outline-offset: -1px; }
+#mi-note { font-size: 12.5px; margin: 10px 0 0; }
+
 /* ── Filter row ── */
 .filter-row { display: flex; align-items: center; gap: 10px; margin: 20px 0 12px; }
 .filter-label { color: var(--text-muted); font-size: 12.5px; }
@@ -259,6 +269,7 @@ tr:last-child td { border-bottom: 0; }
   .conn-name { min-width: 0; }
   .conn-state { flex-basis: 100%; padding-left: 18px; font-size: 13px; }
   .form-grid input, .form-grid textarea { font-size: 16px; padding: 11px 12px; }
+  .mi-controls input { font-size: 16px; padding: 10px 12px; } /* 16px stops iOS auto-zoom */
   #conn-details summary { padding: 6px 0; font-size: 14px; }
 
   /* Charts and tables */
