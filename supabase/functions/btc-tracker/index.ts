@@ -507,6 +507,20 @@ async function fetchCandlesKraken() {
   for (const [time, , , , close] of rows) days[dayKey(time * 1000)] = parseFloat(close);
   return days;
 }
+// Trailing CAGR (%) over `years`, from the cached daily closes: compares the
+// current price to the close nearest to `years` ago (within ±14 days).
+// Recomputed on every dashboard load, so it drifts with the market daily.
+function trailingCagrPct(days: Record<string, number>, currentPrice: number, years = 4) {
+  if (!currentPrice) return null;
+  const target = Date.now() - years * 365.25 * DAY_MS;
+  for (let off = 0; off <= 14; off++) {
+    for (const sign of off ? [-1, 1] : [1]) {
+      const past = days[dayKey(target + sign * off * DAY_MS)];
+      if (past > 0) return (Math.pow(currentPrice / past, 1 / years) - 1) * 100;
+    }
+  }
+  return null;
+}
 async function getDailyPrices(sinceMs: number) {
   const cache = (await kvGet('prices')) || { days: {} };
   const days = cache.days || {};
@@ -644,7 +658,11 @@ async function dashboard() {
   const firstTs = trades.length
     ? Math.min(...trades.map((t: any) => new Date(t.date).getTime()))
     : Date.now() - 1200 * DAY_MS;
-  const dailyPrices = await getDailyPrices(firstTs - DAY_MS);
+  // Keep 4 years of closes around regardless of trade history — the
+  // milestones card defaults its growth rate to the trailing 4-yr CAGR.
+  const dailyPrices = await getDailyPrices(
+    Math.min(firstTs - DAY_MS, Date.now() - 4 * 365.25 * DAY_MS)
+  );
   if (demo) {
     const sample = buildSampleData(dailyPrices, price);
     trades = sample.trades;
@@ -652,6 +670,7 @@ async function dashboard() {
     Object.assign(balances, sample.balances);
   }
   const portfolio = computePortfolio({ trades, transfers, dailyPrices, currentPrice: price, balances });
+  portfolio.summary.trailingCagrPct = trailingCagrPct(dailyPrices, price, 4);
   return {
     ...portfolio,
     onchainAddresses: onchainResult?.perAddress || [],

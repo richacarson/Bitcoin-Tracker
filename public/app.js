@@ -508,9 +508,11 @@ function renderMilestones() {
   const s = state.data.summary;
   const saved = JSON.parse(localStorage.getItem(MI_KEY) || '{}');
   const autoDca = Math.round(estimateDailyUsd());
+  // Default growth = trailing 4-year CAGR (recomputed by the server daily).
+  const autoCagr = s.trailingCagrPct != null ? Math.round(s.trailingCagrPct * 10) / 10 : 30;
   const dcaEl = $('mi-dca'), cagrEl = $('mi-cagr');
   if (document.activeElement !== dcaEl) dcaEl.value = saved.dca ?? autoDca;
-  if (document.activeElement !== cagrEl) cagrEl.value = saved.cagr ?? 30;
+  if (document.activeElement !== cagrEl) cagrEl.value = saved.cagr ?? autoCagr;
   const dailyUsd = parseFloat(dcaEl.value) || 0;
   const cagr = (parseFloat(cagrEl.value) || 0) / 100;
 
@@ -539,7 +541,11 @@ function renderMilestones() {
   $('mi-note').textContent =
     `From your ${fmtBtc(s.currentBtc)} today, buying $${dailyUsd.toLocaleString('en-US')}/day` +
     (saved.dca == null ? ` (your actual last-30-day pace)` : '') +
-    ` with BTC growing ${cagrEl.value || 0}%/yr. Projections, not promises.`;
+    ` with BTC growing ${cagrEl.value || 0}%/yr` +
+    (saved.cagr == null && s.trailingCagrPct != null
+      ? ` (BTC's trailing 4-year CAGR, recalculated daily)`
+      : '') +
+    `. Clear a box to go back to the automatic value. Projections, not promises.`;
 }
 
 for (const id of ['mi-dca', 'mi-cagr']) {
