@@ -516,19 +516,23 @@ function renderMilestones() {
 
   buildTable(
     $('milestones'),
-    ['Milestone', 'Time to reach', 'Date'],
+    ['Milestone', 'Time to reach', 'Date', 'BTC price then', 'Worth then'],
     MI_TARGETS.map((target) => {
       const need = target - s.currentBtc;
       const days = daysToTarget(need, dailyUsd, s.currentPrice, cagr);
-      const eta = fmtEta(days);
+      // Projected price when the milestone lands, on the same growth curve.
+      const priceThen = s.currentPrice * Math.pow(1 + cagr, days / 365);
+      const reachable = isFinite(days);
       return [
         `${target} BTC`,
-        eta,
-        isFinite(days) && days > 0
+        fmtEta(days),
+        reachable && days > 0
           ? new Date(Date.now() + days * 86400000).toLocaleDateString('en-US', days < 90
               ? { month: 'short', day: 'numeric', year: 'numeric' }
               : { month: 'short', year: 'numeric' })
           : '—',
+        reachable ? fmtUsd(priceThen) : '—',
+        reachable ? { cls: 'type-buy', text: fmtUsd(target * priceThen) } : '—',
       ];
     })
   );
