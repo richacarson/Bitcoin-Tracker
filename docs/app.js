@@ -483,19 +483,13 @@ function daysToTarget(needBtc, dailyUsd, price, cagr) {
   return -Math.log(arg) / k;
 }
 
-function fmtEta(days, withDate) {
+function fmtEta(days) {
   if (days === 0) return { cls: 'type-buy', text: 'Reached ✓' };
   if (!isFinite(days)) return 'not at this pace';
-  const date = new Date(Date.now() + days * 86400000);
-  const dateStr = date.toLocaleDateString('en-US', days < 90
-    ? { month: 'short', day: 'numeric', year: 'numeric' }
-    : { month: 'short', year: 'numeric' });
-  let span;
-  if (days < 1.5) span = 'today';
-  else if (days < 90) span = `${Math.round(days)} days`;
-  else if (days < 700) span = `${parseFloat((days / 30.44).toFixed(1))} months`;
-  else span = `${parseFloat((days / 365.25).toFixed(1))} years`;
-  return withDate ? `≈ ${span} · ${dateStr}` : `≈ ${span}`;
+  if (days < 1.5) return 'today';
+  if (days < 90) return `≈ ${Math.round(days)} days`;
+  if (days < 700) return `≈ ${parseFloat((days / 30.44).toFixed(1))} months`;
+  return `≈ ${parseFloat((days / 365.25).toFixed(1))} years`;
 }
 
 // Current buying pace from actual history: most recent window with enough buys.
@@ -522,20 +516,26 @@ function renderMilestones() {
 
   buildTable(
     $('milestones'),
-    ['Milestone', `At ${cagrEl.value || 0}%/yr growth`, 'If price stays flat'],
+    ['Milestone', 'Time to reach', 'Date'],
     MI_TARGETS.map((target) => {
       const need = target - s.currentBtc;
+      const days = daysToTarget(need, dailyUsd, s.currentPrice, cagr);
+      const eta = fmtEta(days);
       return [
         `${target} BTC`,
-        fmtEta(daysToTarget(need, dailyUsd, s.currentPrice, cagr), true),
-        fmtEta(daysToTarget(need, dailyUsd, s.currentPrice, 0), false),
+        eta,
+        isFinite(days) && days > 0
+          ? new Date(Date.now() + days * 86400000).toLocaleDateString('en-US', days < 90
+              ? { month: 'short', day: 'numeric', year: 'numeric' }
+              : { month: 'short', year: 'numeric' })
+          : '—',
       ];
     })
   );
   $('mi-note').textContent =
     `From your ${fmtBtc(s.currentBtc)} today, buying $${dailyUsd.toLocaleString('en-US')}/day` +
     (saved.dca == null ? ` (your actual last-30-day pace)` : '') +
-    `. Rising prices slow accumulation, so the growth column is the conservative bound and flat price the optimistic one. Projections, not promises.`;
+    ` with BTC growing ${cagrEl.value || 0}%/yr. Projections, not promises.`;
 }
 
 for (const id of ['mi-dca', 'mi-cagr']) {
